@@ -477,10 +477,16 @@ export default function PagesPage() {
   const [pageError, setPageError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadPagesIndex().then(data => {
-      setIndex(data);
-      setLoadingIndex(false);
-    });
+    loadPagesIndex()
+      .then(data => {
+        setIndex(data);
+      })
+      .catch(err => {
+        console.error("Failed to load pages index:", err);
+      })
+      .finally(() => {
+        setLoadingIndex(false);
+      });
   }, []);
 
   async function handleSelectCluster(cluster: ClusterMeta) {
