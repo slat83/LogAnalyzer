@@ -52,15 +52,15 @@ export default function DataTable<T extends Record<string, unknown>>({
 
   return (
     <div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+      <div className="overflow-x-auto -mx-4 px-4 md:mx-0 md:px-0">
+        <table className="w-full text-xs md:text-sm min-w-[500px]">
           <thead>
             <tr className="border-b border-gray-700">
               {columns.map((col) => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className="px-3 py-2 text-left font-medium text-gray-400 cursor-pointer hover:text-white select-none"
+                  className="px-2 md:px-3 py-2 text-left font-medium text-gray-400 cursor-pointer hover:text-white select-none whitespace-nowrap"
                 >
                   {col.label}{" "}
                   {sortKey === col.key ? (sortDir === "asc" ? "↑" : "↓") : ""}
@@ -75,7 +75,7 @@ export default function DataTable<T extends Record<string, unknown>>({
                 className="border-b border-gray-800 hover:bg-gray-800/50"
               >
                 {columns.map((col) => (
-                  <td key={col.key} className="px-3 py-2">
+                  <td key={col.key} className="px-2 md:px-3 py-2">
                     {col.render ? col.render(row) : String(row[col.key] ?? "")}
                   </td>
                 ))}
@@ -85,7 +85,7 @@ export default function DataTable<T extends Record<string, unknown>>({
         </table>
       </div>
       {totalPages > 1 && (
-        <div className="flex gap-2 mt-3 items-center text-sm text-gray-400">
+        <div className="flex gap-2 mt-3 items-center text-xs md:text-sm text-gray-400">
           <button
             onClick={() => setPage(Math.max(0, page - 1))}
             disabled={page === 0}

@@ -52,37 +52,37 @@ export default function PerformancePage() {
   }));
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Performance</h2>
+    <div className="space-y-4 md:space-y-6">
+      <h2 className="text-lg md:text-2xl font-bold">Performance</h2>
 
       {/* Global stats */}
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-green-400">{data.responseTime.avg}s</div>
-          <div className="text-gray-400 text-sm">Average</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center">
+          <div className="text-lg md:text-2xl font-bold text-green-400">{data.responseTime.avg}s</div>
+          <div className="text-gray-400 text-xs md:text-sm">Average</div>
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-blue-400">{data.responseTime.median}s</div>
-          <div className="text-gray-400 text-sm">Median</div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center">
+          <div className="text-lg md:text-2xl font-bold text-blue-400">{data.responseTime.median}s</div>
+          <div className="text-gray-400 text-xs md:text-sm">Median</div>
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-yellow-400">{data.responseTime.p95}s</div>
-          <div className="text-gray-400 text-sm">p95</div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center">
+          <div className="text-lg md:text-2xl font-bold text-yellow-400">{data.responseTime.p95}s</div>
+          <div className="text-gray-400 text-xs md:text-sm">p95</div>
         </div>
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 text-center">
-          <div className="text-2xl font-bold text-red-400">{data.responseTime.p99}s</div>
-          <div className="text-gray-400 text-sm">p99</div>
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4 text-center">
+          <div className="text-lg md:text-2xl font-bold text-red-400">{data.responseTime.p99}s</div>
+          <div className="text-gray-400 text-xs md:text-sm">p99</div>
         </div>
       </div>
 
       {/* Response time distribution */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h3 className="text-lg font-semibold mb-3">Response Time Distribution (by cluster avg)</h3>
-        <ResponsiveContainer width="100%" height={300}>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
+        <h3 className="text-base md:text-lg font-semibold mb-3">Response Time Distribution (by cluster avg)</h3>
+        <ResponsiveContainer width="100%" height={250}>
           <BarChart data={histogram}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis dataKey="name" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-            <YAxis stroke="#9ca3af" tick={{ fontSize: 11 }} tickFormatter={v => (v / 1000).toFixed(0) + "k"} />
+            <XAxis dataKey="name" stroke="#9ca3af" tick={{ fontSize: 9 }} angle={-30} textAnchor="end" height={50} />
+            <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} tickFormatter={v => (v / 1000).toFixed(0) + "k"} width={40} />
             <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: 8 }} formatter={(v: number) => v.toLocaleString()} />
             <Bar dataKey="count" fill="#f59e0b" />
           </BarChart>
@@ -90,23 +90,27 @@ export default function PerformancePage() {
       </div>
 
       {/* Slowest clusters chart */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h3 className="text-lg font-semibold mb-3">Slowest Clusters (by p95)</h3>
-        <ResponsiveContainer width="100%" height={400}>
-          <BarChart data={chartData} layout="vertical">
-            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-            <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 11 }} />
-            <YAxis type="category" dataKey="name" stroke="#9ca3af" tick={{ fontSize: 10 }} width={200} />
-            <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: 8 }} />
-            <Bar dataKey="avg" fill="#3b82f6" name="Avg" />
-            <Bar dataKey="p95" fill="#ef4444" name="p95" />
-          </BarChart>
-        </ResponsiveContainer>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
+        <h3 className="text-base md:text-lg font-semibold mb-3">Slowest Clusters (by p95)</h3>
+        <div className="overflow-x-auto -mx-3 px-3 md:mx-0 md:px-0">
+          <div className="min-w-[500px]">
+            <ResponsiveContainer width="100%" height={350}>
+              <BarChart data={chartData} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis type="number" stroke="#9ca3af" tick={{ fontSize: 10 }} />
+                <YAxis type="category" dataKey="name" stroke="#9ca3af" tick={{ fontSize: 9 }} width={160} />
+                <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: 8 }} />
+                <Bar dataKey="avg" fill="#3b82f6" name="Avg" />
+                <Bar dataKey="p95" fill="#ef4444" name="p95" />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
       </div>
 
       {/* Performance table */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-        <h3 className="text-lg font-semibold mb-3">All Clusters by Performance</h3>
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
+        <h3 className="text-base md:text-lg font-semibold mb-3">All Clusters by Performance</h3>
         <DataTable data={slowest as unknown as Record<string, unknown>[]} columns={perfCols} pageSize={20} />
       </div>
     </div>

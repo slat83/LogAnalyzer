@@ -1,0 +1,826 @@
+"use client";
+import { useEffect, useState, useMemo } from "react";
+import { loadPagesData, loadSummary } from "@/lib/data";
+import { PagesData, PageCluster, PageData, Summary } from "@/lib/types";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function getHostname(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "epicvin.com";
+  }
+}
+
+function getDisplayPath(page: PageData): string {
+  try {
+    const u = new URL(page.url);
+    const display = u.pathname + u.search;
+    return display.length > 80 ? display.slice(0, 77) + '...' : display;
+  } catch {
+    return page.path || '/';
+  }
+}
+
+function fmt(n: number | null | undefined, digits = 0): string {
+  if (n == null) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: digits });
+}
+
+function pct(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return (n * 100).toFixed(1) + "%";
+}
+
+function pos(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return n.toFixed(1);
+}
+
+function dur(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function indexBadge(status: string | null | undefined): React.ReactNode {
+  if (!status) return <span className="text-gray-600 text-xs">—</span>;
+  if (status === "INDEXED") return <span className="text-green-400 text-xs font-medium">✓ Indexed</span>;
+  if (status === "UNKNOWN") return <span className="text-gray-500 text-xs">?</span>;
+  return <span className="text-yellow-400 text-xs">{status}</span>;
+}
+
+function SubdomainBadge({ url }: { url: string }) {
+  const host = getHostname(url);
+  if (host === "epicvin.com") return null;
+  const label = host.replace(".epicvin.com", "");
+  const isDeactivated = host === "cars.epicvin.com";
+  return (
+    <span
+      className={`inline-block px-1.5 py-0.5 rounded text-[10px] ml-1 shrink-0 ${
+        isDeactivated
+          ? "bg-orange-900/40 text-orange-400 border border-orange-800/50"
+          : "bg-gray-700 text-gray-400 border border-gray-600/50"
+      }`}
+      title={host}
+    >
+      {label}
+    </span>
+  );
+}
+
+const CHANNEL_COLORS: Record<string, string> = {
+  "Organic Search":   "#22c55e",
+  "Direct":           "#3b82f6",
+  "Paid Search":      "#f59e0b",
+  "Referral":         "#a855f7",
+  "Cross-network":    "#ec4899",
+  "Organic Social":   "#06b6d4",
+  "Display":          "#f97316",
+  "Paid Social":      "#8b5cf6",
+  "Unassigned":       "#6b7280",
+  "Paid Other":       "#fb923c",
+  "Affiliates":       "#84cc16",
+  "Organic Video":    "#14b8a6",
+  "Organic Shopping": "#e879f9",
+};
+
+function ChannelPills({ channels }: { channels: Record<string, number> }) {
+  const total = Object.values(channels).reduce((s, v) => s + v, 0);
+  if (total === 0) return <span className="text-gray-600 text-xs">—</span>;
+
+  const sorted = Object.entries(channels)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4);
+
+  return (
+    <div className="flex flex-wrap gap-1">
+      {sorted.map(([ch, v]) => {
+        const pctVal = ((v / total) * 100).toFixed(0);
+        const color  = CHANNEL_COLORS[ch] || "#9ca3af";
+        return (
+          <span
+            key={ch}
+            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] bg-gray-800 border border-gray-700"
+            title={`${ch}: ${v.toLocaleString()} sessions (${pctVal}%)`}
+          >
+            <span className="w-2 h-2 rounded-full inline-block shrink-0" style={{ backgroundColor: color }} />
+            <span className="text-gray-300">{pctVal}%</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Summary Cards ─────────────────────────────────────────────────────────────
+
+function SummaryCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+      <div className="text-xs text-gray-500 mb-1">{label}</div>
+      <div className="text-xl font-bold text-white">{value}</div>
+      {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+    </div>
+  );
+}
+
+// ── Cluster Table ─────────────────────────────────────────────────────────────
+
+type SortKey = keyof PageCluster | "none";
+
+function ClusterTable({
+  clusters,
+  onSelect,
+  botClusters,
+}: {
+  clusters: PageCluster[];
+  onSelect: (c: PageCluster) => void;
+  botClusters: Record<string, number>;
+}) {
+  const [sort, setSort]   = useState<{ key: string; dir: 1 | -1 }>({ key: "totalClicks", dir: -1 });
+  const [search, setSearch] = useState("");
+  const [page, setPage]   = useState(0);
+  const PAGE_SIZE = 50;
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return clusters.filter(c => !q || c.pattern.toLowerCase().includes(q));
+  }, [clusters, search]);
+
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const av = (a as unknown as Record<string, unknown>)[sort.key] ?? 0;
+      const bv = (b as unknown as Record<string, unknown>)[sort.key] ?? 0;
+      if (av < bv) return sort.dir;
+      if (av > bv) return -sort.dir;
+      return 0;
+    });
+  }, [filtered, sort]);
+
+  const paged   = sorted.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPg = Math.ceil(sorted.length / PAGE_SIZE);
+
+  function th(label: string, key: string, title?: string) {
+    const active = sort.key === key;
+    return (
+      <th
+        className="px-3 py-2 text-left text-xs text-gray-400 font-medium cursor-pointer select-none hover:text-white whitespace-nowrap"
+        onClick={() => { setSort(s => ({ key, dir: s.key === key ? (-s.dir as 1 | -1) : -1 })); setPage(0); }}
+        title={title}
+      >
+        {label} {active ? (sort.dir === -1 ? "↓" : "↑") : ""}
+      </th>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <input
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(0); }}
+          placeholder="Filter clusters..."
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 w-64 focus:outline-none focus:border-blue-500"
+        />
+        <span className="text-xs text-gray-500">{filtered.length} clusters</span>
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-gray-800">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-900 border-b border-gray-800">
+            <tr>
+              {th("Cluster", "pattern")}
+              {th("Pages", "pageCount")}
+              {th("Sessions", "totalSessions")}
+              {th("Users", "totalUsers")}
+              {th("Clicks", "totalClicks")}
+              {th("Impressions", "totalImpressions")}
+              {th("Avg Position", "avgPosition")}
+              {th("Bounce Rate", "avgBounceRate")}
+              {th("Indexed %", "indexedPct")}
+              <th className="px-3 py-2 text-left text-xs text-gray-400 font-medium whitespace-nowrap">Bot Reqs</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/50">
+            {paged.map(c => {
+              const botCount = botClusters[c.pattern] || 0;
+              return (
+                <tr
+                  key={c.pattern}
+                  onClick={() => onSelect(c)}
+                  className="hover:bg-gray-800/50 cursor-pointer transition-colors"
+                >
+                  <td className="px-3 py-2 text-blue-400 font-mono text-xs break-all max-w-[200px]">
+                    {c.pattern === "/" ? "/ (homepage)" : c.pattern}
+                  </td>
+                  <td className="px-3 py-2 text-gray-300 text-right">{fmt(c.pageCount)}</td>
+                  <td className="px-3 py-2 text-gray-300 text-right">{fmt(c.totalSessions)}</td>
+                  <td className="px-3 py-2 text-gray-300 text-right">{fmt(c.totalUsers)}</td>
+                  <td className="px-3 py-2 text-gray-300 text-right font-medium">{fmt(c.totalClicks)}</td>
+                  <td className="px-3 py-2 text-gray-400 text-right">{fmt(c.totalImpressions)}</td>
+                  <td className="px-3 py-2 text-right">
+                    {c.avgPosition != null ? (
+                      <span className={c.avgPosition <= 10 ? "text-green-400" : c.avgPosition <= 20 ? "text-yellow-400" : "text-gray-400"}>
+                        {pos(c.avgPosition)}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {c.avgBounceRate != null ? (
+                      <span className={c.avgBounceRate > 0.7 ? "text-red-400" : c.avgBounceRate > 0.4 ? "text-yellow-400" : "text-green-400"}>
+                        {pct(c.avgBounceRate)}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {c.indexedPct > 0 ? (
+                      <span className={c.indexedPct >= 80 ? "text-green-400" : c.indexedPct >= 50 ? "text-yellow-400" : "text-red-400"}>
+                        {c.indexedPct}%
+                      </span>
+                    ) : <span className="text-gray-600">—</span>}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    {botCount > 0 ? (
+                      <span className="text-orange-400 text-xs">{fmt(botCount)}</span>
+                    ) : <span className="text-gray-700">—</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPg > 1 && (
+        <div className="flex items-center gap-2 text-xs">
+          <button disabled={page === 0} onClick={() => setPage(p => p - 1)} className="px-2 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 text-gray-300">‹ Prev</button>
+          <span className="text-gray-400">Page {page + 1} of {totalPg}</span>
+          <button disabled={page >= totalPg - 1} onClick={() => setPage(p => p + 1)} className="px-2 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 text-gray-300">Next ›</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Page Table (drill-down) ───────────────────────────────────────────────────
+
+function PageTable({
+  pages,
+  clusterBots,
+  onBack,
+}: {
+  pages: PageData[];
+  clusterBots: { ua: string; count: number }[];
+  onBack: () => void;
+}) {
+  const [sort, setSort]   = useState<{ key: string; dir: 1 | -1 }>({ key: "clicks", dir: -1 });
+  const [search, setSearch] = useState("");
+  const [pg, setPg]       = useState(0);
+  const PAGE_SIZE = 50;
+
+  type SortableRow = { [key: string]: number | string | null };
+
+  function getSortVal(p: PageData, key: string): number | string {
+    if (key === "clicks")      return p.gsc?.clicks      ?? -1;
+    if (key === "impressions") return p.gsc?.impressions  ?? -1;
+    if (key === "ctr")         return p.gsc?.ctr          ?? -1;
+    if (key === "position")    return p.gsc?.position     ?? 9999;
+    if (key === "sessions")    return p.ga4?.sessions     ?? -1;
+    if (key === "users")       return p.ga4?.users        ?? -1;
+    if (key === "bounceRate")  return p.ga4?.bounceRate   ?? -1;
+    if (key === "avgDuration") return p.ga4?.avgDuration  ?? -1;
+    if (key === "conversions") return p.ga4?.conversions  ?? -1;
+    if (key === "url")         return p.url;
+    if (key === "indexed")     return p.indexing?.status === "INDEXED" ? 1 : 0;
+    return -1;
+  }
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return pages.filter(p => !q || p.url.toLowerCase().includes(q));
+  }, [pages, search]);
+
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      const av = getSortVal(a, sort.key);
+      const bv = getSortVal(b, sort.key);
+      if (av < bv) return sort.dir;
+      if (av > bv) return -sort.dir;
+      return 0;
+    });
+  }, [filtered, sort]);
+
+  const paged   = sorted.slice(pg * PAGE_SIZE, (pg + 1) * PAGE_SIZE);
+  const totalPg = Math.ceil(sorted.length / PAGE_SIZE);
+
+  function th(label: string, key: string, title?: string) {
+    const active = sort.key === key;
+    return (
+      <th
+        className="px-2 py-2 text-left text-xs text-gray-400 font-medium cursor-pointer select-none hover:text-white whitespace-nowrap"
+        onClick={() => { setSort(s => ({ key, dir: s.key === key ? (-s.dir as 1 | -1) : -1 })); setPg(0); }}
+        title={title}
+      >
+        {label} {active ? (sort.dir === -1 ? "↓" : "↑") : ""}
+      </th>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={onBack} className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+          ← Back to clusters
+        </button>
+        <input
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPg(0); }}
+          placeholder="Filter URLs..."
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 w-72 focus:outline-none focus:border-blue-500"
+        />
+        <span className="text-xs text-gray-500">{filtered.length} pages</span>
+      </div>
+
+      {/* Bot traffic for this cluster */}
+      {clusterBots.length > 0 && (
+        <div className="bg-orange-950/30 border border-orange-900/50 rounded-xl p-3">
+          <div className="text-xs font-medium text-orange-300 mb-2">🤖 Bot traffic in this cluster</div>
+          <div className="flex flex-wrap gap-2">
+            {clusterBots.slice(0, 8).map(b => (
+              <span key={b.ua} className="px-2 py-1 bg-orange-900/30 border border-orange-800/50 rounded text-xs text-orange-300">
+                {b.ua}: <span className="text-orange-200 font-medium">{fmt(b.count)}</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-gray-800">
+        <table className="w-full text-xs">
+          <thead className="bg-gray-900 border-b border-gray-800">
+            <tr>
+              {th("URL", "url")}
+              {th("Sessions", "sessions")}
+              {th("Users", "users")}
+              {th("Clicks", "clicks")}
+              {th("Impressions", "impressions")}
+              {th("CTR", "ctr")}
+              {th("Position", "position")}
+              {th("Bounce", "bounceRate")}
+              {th("Avg Dur", "avgDuration")}
+              {th("Conv", "conversions")}
+              {th("Indexed", "indexed")}
+              <th className="px-2 py-2 text-left text-xs text-gray-400 font-medium whitespace-nowrap">Last Crawl</th>
+              <th className="px-2 py-2 text-left text-xs text-gray-400 font-medium whitespace-nowrap">Channels</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800/40">
+            {paged.map(p => (
+              <tr key={p.url} className="hover:bg-gray-800/30 transition-colors">
+                <td className="px-2 py-2 max-w-[240px]">
+                  <div className="flex items-start gap-1 flex-wrap">
+                    <a
+                      href={p.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300 hover:underline font-mono break-all leading-tight"
+                      title={p.url}
+                    >
+                      {getDisplayPath(p)}
+                    </a>
+                    <SubdomainBadge url={p.url} />
+                    {p.urlVariants && p.urlVariants > 1 && (
+                      <span
+                        className="inline-block px-1.5 py-0.5 rounded text-[10px] bg-purple-900/40 text-purple-300 border border-purple-800/50 shrink-0"
+                        title={`Aggregated from ${p.urlVariants} URL variants (query params/fragments)`}
+                      >
+                        {p.urlVariants} variants
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-2 py-2 text-gray-300 text-right">{fmt(p.ga4?.sessions)}</td>
+                <td className="px-2 py-2 text-gray-300 text-right">{fmt(p.ga4?.users)}</td>
+                <td className="px-2 py-2 text-gray-200 text-right font-medium">{fmt(p.gsc?.clicks)}</td>
+                <td className="px-2 py-2 text-gray-400 text-right">{fmt(p.gsc?.impressions)}</td>
+                <td className="px-2 py-2 text-right">
+                  {p.gsc?.ctr != null ? (
+                    <span className={p.gsc.ctr >= 0.05 ? "text-green-400" : p.gsc.ctr >= 0.02 ? "text-yellow-400" : "text-gray-400"}>
+                      {(p.gsc.ctr * 100).toFixed(2)}%
+                    </span>
+                  ) : "—"}
+                </td>
+                <td className="px-2 py-2 text-right">
+                  {p.gsc?.position != null ? (
+                    <span className={p.gsc.position <= 10 ? "text-green-400" : p.gsc.position <= 20 ? "text-yellow-400" : "text-gray-400"}>
+                      {pos(p.gsc.position)}
+                    </span>
+                  ) : "—"}
+                </td>
+                <td className="px-2 py-2 text-right">
+                  {p.ga4?.bounceRate != null ? (
+                    <span className={p.ga4.bounceRate > 0.7 ? "text-red-400" : p.ga4.bounceRate > 0.4 ? "text-yellow-400" : "text-green-400"}>
+                      {pct(p.ga4.bounceRate)}
+                    </span>
+                  ) : "—"}
+                </td>
+                <td className="px-2 py-2 text-gray-400 text-right">{dur(p.ga4?.avgDuration)}</td>
+                <td className="px-2 py-2 text-gray-300 text-right">{fmt(p.ga4?.conversions)}</td>
+                <td className="px-2 py-2 text-center">{indexBadge(p.indexing?.status)}</td>
+                <td className="px-2 py-2 text-gray-500">{p.indexing?.lastCrawl || "—"}</td>
+                <td className="px-2 py-2">
+                  <ChannelPills channels={p.channels || {}} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {totalPg > 1 && (
+        <div className="flex items-center gap-2 text-xs">
+          <button disabled={pg === 0} onClick={() => setPg(p => p - 1)} className="px-2 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 text-gray-300">‹ Prev</button>
+          <span className="text-gray-400">Page {pg + 1} of {totalPg}</span>
+          <button disabled={pg >= totalPg - 1} onClick={() => setPg(p => p + 1)} className="px-2 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 text-gray-300">Next ›</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
+export default function PagesPage() {
+  const [data, setData]       = useState<PagesData | null>(null);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [selected, setSelected] = useState<PageCluster | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [subdomainFilter, setSubdomainFilter] = useState<string>("epicvin.com");
+
+  useEffect(() => {
+    Promise.all([loadPagesData(), loadSummary()]).then(([pd, sm]) => {
+      setData(pd);
+      setSummary(sm);
+      setLoading(false);
+    });
+  }, []);
+
+  // Reset selected cluster when filter changes
+  useEffect(() => {
+    setSelected(null);
+  }, [subdomainFilter]);
+
+  // Count pages per subdomain
+  const subdomainCounts = useMemo(() => {
+    if (!data) return {} as Record<string, number>;
+    const counts: Record<string, number> = {};
+    for (const page of data.pages) {
+      const host = getHostname(page.url);
+      counts[host] = (counts[host] || 0) + 1;
+    }
+    return counts;
+  }, [data]);
+
+  // Sorted list of subdomains (by page count desc)
+  const subdomains = useMemo(() => {
+    return Object.entries(subdomainCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([host]) => host);
+  }, [subdomainCounts]);
+
+  // Pages filtered by selected subdomain + deduplicated by normalized path
+  const filteredPages = useMemo(() => {
+    if (!data) return [] as PageData[];
+    const raw = subdomainFilter === "all" ? data.pages : data.pages.filter(p => getHostname(p.url) === subdomainFilter);
+
+    // Deduplicate: group by hostname + pathname (strip query/fragment)
+    const groups = new Map<string, PageData[]>();
+    for (const page of raw) {
+      let key: string;
+      try {
+        const u = new URL(page.url);
+        key = u.hostname + u.pathname;
+      } catch {
+        key = page.url;
+      }
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(page);
+    }
+
+    // Merge each group into one page
+    return Array.from(groups.values()).map(group => {
+      if (group.length === 1) return group[0];
+
+      const base = group[0];
+      // Sum GSC metrics
+      const totalClicks = group.reduce((s, p) => s + (p.gsc?.clicks ?? 0), 0);
+      const totalImpressions = group.reduce((s, p) => s + (p.gsc?.impressions ?? 0), 0);
+      const withPos = group.filter(p => p.gsc?.position != null && p.gsc?.impressions);
+      const avgPosition = withPos.length > 0
+        ? withPos.reduce((s, p) => s + p.gsc!.position * p.gsc!.impressions, 0) / withPos.reduce((s, p) => s + p.gsc!.impressions, 0)
+        : base.gsc?.position ?? null;
+
+      return {
+        ...base,
+        // Canonical URL (without query)
+        url: (() => { try { const u = new URL(base.url); return u.origin + u.pathname; } catch { return base.url; } })(),
+        path: (() => { try { return new URL(base.url).pathname; } catch { return base.path; } })(),
+        gsc: totalClicks > 0 || totalImpressions > 0 ? {
+          clicks: totalClicks,
+          impressions: totalImpressions,
+          ctr: totalImpressions > 0 ? totalClicks / totalImpressions : 0,
+          position: avgPosition ?? 0,
+        } : base.gsc,
+        // GA4 stays from base (already by path, no duplication)
+        urlVariants: group.length,
+      } as PageData;
+    });
+  }, [data, subdomainFilter]);
+
+  // Recalculate clusters from filtered pages
+  const filteredClusters = useMemo(() => {
+    if (!data) return [];
+    if (subdomainFilter === "all") return data.clusters;
+
+    // Group filtered pages by cluster pattern
+    const clusterMap = new Map<string, PageData[]>();
+    for (const page of filteredPages) {
+      if (!clusterMap.has(page.cluster)) clusterMap.set(page.cluster, []);
+      clusterMap.get(page.cluster)!.push(page);
+    }
+
+    return data.clusters
+      .filter(c => clusterMap.has(c.pattern))
+      .map(c => {
+        const pages = clusterMap.get(c.pattern)!;
+        const totalClicks      = pages.reduce((s, p) => s + (p.gsc?.clicks      ?? 0), 0);
+        const totalImpressions = pages.reduce((s, p) => s + (p.gsc?.impressions ?? 0), 0);
+        const totalSessions    = pages.reduce((s, p) => s + (p.ga4?.sessions    ?? 0), 0);
+        const totalUsers       = pages.reduce((s, p) => s + (p.ga4?.users       ?? 0), 0);
+        const totalPageviews   = pages.reduce((s, p) => s + (p.ga4?.pageviews   ?? 0), 0);
+        const totalConversions = pages.reduce((s, p) => s + (p.ga4?.conversions ?? 0), 0);
+
+        const withPos = pages.filter(p => p.gsc?.position != null);
+        const avgPosition = withPos.length > 0
+          ? withPos.reduce((s, p) => s + p.gsc!.position, 0) / withPos.length
+          : null;
+
+        const withBounce = pages.filter(p => p.ga4?.bounceRate != null);
+        const avgBounceRate = withBounce.length > 0
+          ? withBounce.reduce((s, p) => s + p.ga4!.bounceRate, 0) / withBounce.length
+          : null;
+
+        const indexedCount = pages.filter(p => p.indexing?.status === "INDEXED").length;
+        const indexedPct   = pages.length > 0 ? Math.round((indexedCount / pages.length) * 100) : 0;
+
+        return {
+          ...c,
+          pages: pages.map(p => p.url),
+          pageCount: pages.length,
+          totalClicks, totalImpressions,
+          totalSessions, totalUsers, totalPageviews, totalConversions,
+          avgPosition, avgBounceRate, indexedCount, indexedPct,
+        };
+      });
+  }, [data, filteredPages, subdomainFilter]);
+
+  // Recalculate summary from filtered pages
+  const filteredSummary = useMemo(() => {
+    if (!data) return null;
+    if (subdomainFilter === "all") return data.summary;
+
+    const pages = filteredPages;
+    const totalPages    = pages.length;
+    const totalClusters = new Set(pages.map(p => p.cluster)).size;
+    const totalClicks   = pages.reduce((s, p) => s + (p.gsc?.clicks    ?? 0), 0);
+    const totalSessions = pages.reduce((s, p) => s + (p.ga4?.sessions  ?? 0), 0);
+
+    const withPos = pages.filter(p => p.gsc?.position != null);
+    const avgPosition = withPos.length > 0
+      ? withPos.reduce((s, p) => s + p.gsc!.position, 0) / withPos.length
+      : null;
+
+    const indexed    = pages.filter(p => p.indexing?.status === "INDEXED").length;
+    const indexedPct = totalPages > 0 ? Math.round((indexed / totalPages) * 100) : null;
+
+    const withBounce = pages.filter(p => p.ga4?.bounceRate != null);
+    const avgBounceRate = withBounce.length > 0
+      ? withBounce.reduce((s, p) => s + p.ga4!.bounceRate, 0) / withBounce.length
+      : null;
+
+    return { totalPages, totalClusters, totalClicks, totalSessions, avgPosition, indexedPct, avgBounceRate };
+  }, [data, filteredPages, subdomainFilter]);
+
+  // Build botClusters map from summary.json bots data
+  const botClusters = useMemo<Record<string, number>>(() => {
+    if (!summary?.bots) return {};
+    const result: Record<string, number> = {};
+    for (const [, botData] of Object.entries(summary.bots)) {
+      for (const { url, count } of botData.topPages || []) {
+        // Match URL to cluster pattern
+        let path = url;
+        try { path = new URL(url).pathname; } catch { /* use as-is */ }
+        const segments = path.split('/').filter(Boolean);
+        const cluster = segments.length >= 2
+          ? '/' + segments.slice(0, 2).join('/') + '/*'
+          : segments.length === 1 ? '/' + segments[0] : '/';
+        result[cluster] = (result[cluster] || 0) + count;
+      }
+    }
+    return result;
+  }, [summary]);
+
+  // Bot UAs for a specific cluster
+  function getClusterBots(clusterPattern: string): { ua: string; count: number }[] {
+    if (!summary?.bots) return [];
+    const uaCounts: Record<string, number> = {};
+    for (const [ua, botData] of Object.entries(summary.bots)) {
+      for (const { url, count } of botData.topPages || []) {
+        let path = url;
+        try { path = new URL(url).pathname; } catch { /* use as-is */ }
+        const segments = path.split('/').filter(Boolean);
+        const cluster = segments.length >= 2
+          ? '/' + segments.slice(0, 2).join('/') + '/*'
+          : segments.length === 1 ? '/' + segments[0] : '/';
+        if (cluster === clusterPattern) {
+          uaCounts[ua] = (uaCounts[ua] || 0) + count;
+        }
+      }
+    }
+    return Object.entries(uaCounts)
+      .map(([ua, count]) => ({ ua, count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  // Pages for selected cluster (respect subdomain filter)
+  const clusterPages = useMemo<PageData[]>(() => {
+    if (!data || !selected) return [];
+    return filteredPages.filter(p => p.cluster === selected.pattern);
+  }, [data, selected, filteredPages]);
+
+  if (loading) return <div className="text-gray-400 p-8 animate-pulse">Loading pages data...</div>;
+
+  if (!data || !filteredSummary) {
+    return (
+      <div className="p-8 text-center space-y-3">
+        <div className="text-4xl">📄</div>
+        <div className="text-gray-300 font-medium">No pages data found</div>
+        <div className="text-gray-500 text-sm">
+          Run the collector script to generate data:
+        </div>
+        <code className="block bg-gray-900 rounded-lg p-3 text-green-400 text-sm mt-2">
+          node ~/.openclaw/workspace/scripts/pages-data-collector.mjs
+        </code>
+      </div>
+    );
+  }
+
+  const s = filteredSummary;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-lg md:text-2xl font-bold">
+            {selected ? (
+              <>
+                <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-200 font-normal mr-2">Pages</button>
+                <span className="text-gray-500 mr-2">/</span>
+                <span className="font-mono text-blue-400">{selected.pattern}</span>
+              </>
+            ) : (
+              "📄 Pages"
+            )}
+          </h2>
+          <div className="text-xs text-gray-500 mt-0.5">
+            {data.dateRange.start} → {data.dateRange.end}
+            {" · "}
+            Updated {new Date(data.timestamp).toLocaleDateString()}
+          </div>
+        </div>
+      </div>
+
+      {/* Subdomain filter pills */}
+      {!selected && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-gray-500 shrink-0">Subdomain:</span>
+          <button
+            onClick={() => setSubdomainFilter("all")}
+            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+              subdomainFilter === "all"
+                ? "bg-blue-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
+            }`}
+          >
+            All ({fmt(data.pages.length)})
+          </button>
+          {subdomains.map(host => (
+            <button
+              key={host}
+              onClick={() => setSubdomainFilter(host)}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                subdomainFilter === host
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
+              }`}
+            >
+              {host} ({fmt(subdomainCounts[host])})
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Summary cards — recalculate on filter change */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <SummaryCard
+          label="Total Pages"
+          value={fmt(s.totalPages)}
+          sub={`${fmt(s.totalClusters)} clusters`}
+        />
+        <SummaryCard
+          label="Total Sessions"
+          value={s.totalSessions >= 1_000_000
+            ? (s.totalSessions / 1_000_000).toFixed(1) + "M"
+            : fmt(s.totalSessions)}
+        />
+        <SummaryCard
+          label="Clicks (GSC)"
+          value={s.totalClicks >= 1000
+            ? (s.totalClicks / 1000).toFixed(0) + "K"
+            : fmt(s.totalClicks)}
+          sub="last 28 days"
+        />
+        <SummaryCard
+          label="Avg Position"
+          value={pos(s.avgPosition)}
+          sub="Google Search"
+        />
+        <SummaryCard
+          label="Indexed"
+          value={s.indexedPct != null ? s.indexedPct + "%" : "—"}
+          sub="top 100 URLs"
+        />
+        <SummaryCard
+          label="Avg Bounce Rate"
+          value={pct(s.avgBounceRate)}
+        />
+      </div>
+
+      {/* Cluster or page drill-down */}
+      {selected ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
+          {/* Cluster summary row */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-sm">
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Pages</div>
+              <div className="text-white font-medium">{fmt(selected.pageCount)}</div>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Sessions</div>
+              <div className="text-white font-medium">{fmt(selected.totalSessions)}</div>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Clicks</div>
+              <div className="text-white font-medium">{fmt(selected.totalClicks)}</div>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Avg Position</div>
+              <div className={`font-medium ${selected.avgPosition && selected.avgPosition <= 10 ? "text-green-400" : "text-yellow-400"}`}>
+                {pos(selected.avgPosition)}
+              </div>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Bounce Rate</div>
+              <div className={`font-medium ${selected.avgBounceRate && selected.avgBounceRate > 0.7 ? "text-red-400" : "text-green-400"}`}>
+                {pct(selected.avgBounceRate)}
+              </div>
+            </div>
+            <div className="bg-gray-800/50 rounded-lg p-3">
+              <div className="text-xs text-gray-500">Indexed</div>
+              <div className={`font-medium ${selected.indexedPct >= 80 ? "text-green-400" : selected.indexedPct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
+                {selected.indexedPct}%
+              </div>
+            </div>
+          </div>
+
+          <PageTable
+            pages={clusterPages}
+            clusterBots={getClusterBots(selected.pattern)}
+            onBack={() => setSelected(null)}
+          />
+        </div>
+      ) : (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+          <ClusterTable
+            clusters={filteredClusters}
+            onSelect={setSelected}
+            botClusters={botClusters}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

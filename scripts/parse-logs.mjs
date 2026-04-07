@@ -66,6 +66,11 @@ const GENERIC_BOT = /bot|crawl|spider|scraper|fetch|monitor|check|curl|wget|pyth
 
 const STATIC_EXT = /\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico|map|webp|avif)(\?|$)/i;
 const LANG_PREFIX = /^\/(es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi)\//;
+const LANG_PREFIXES_SET = new Set(['es','fr','ru','pl','ar','de','pt','it','nl','uk','ja','ko','zh','tr','vi']);
+
+// Checkout URL pattern - matches /check-vin-number-and-get-the-vehicle-history-report/checkout/SOMETHING
+// or with language prefix
+const CHECKOUT_RE = /(?:\/(?:es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi))?\/check-vin-number-and-get-the-vehicle-history-report\/checkout\/([a-z0-9]+)/i;
 
 function classifyUrl(url) {
   // Static assets
@@ -123,25 +128,55 @@ function detectBot(ua) {
   return null;
 }
 
+function isBot(ua) {
+  return detectBot(ua) !== null;
+}
+
+function isGooglebot(ua) {
+  return /googlebot/i.test(ua);
+}
+
 function shortenUA(ua) {
-  // Extract browser/bot name briefly
   if (!ua) return 'unknown';
   const m = ua.match(/(Chrome|Firefox|Safari|Edge|Opera|CriOS|Googlebot|Bingbot|Ahrefsbot|SemrushBot|curl|python|Go-http|Telegraf)[\/\s]?[\d.]*/i);
   if (m) return m[0].slice(0, 40);
   return ua.slice(0, 40);
 }
 
-// Parse log line - format: date timezone URL user_agent status_code response_time
+// Parse log line
 const LINE_REGEX = /^(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2}) ([+-]\d{4}) (\S+) (.+?) (\d{3})\s*([\d.]*)\s*$/;
 
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 function parseDate(dateStr) {
-  // 16/Mar/2026:00:00:49
   const d = dateStr.slice(0, 2);
   const m = dateStr.slice(3, 6);
   const y = dateStr.slice(7, 11);
   return `${y}-${String(MONTHS[m] + 1).padStart(2, '0')}-${d}`;
+}
+
+function parseHour(dateStr) {
+  // dateStr: 16/Mar/2026:14:23:49
+  return parseInt(dateStr.slice(12, 14), 10);
+}
+
+// Zeller's formula to avoid Date object creation
+function parseDayOfWeek(dateStr) {
+  let d = parseInt(dateStr.slice(0, 2), 10);
+  let m = MONTHS[dateStr.slice(3, 6)] + 1; // 1-12
+  let y = parseInt(dateStr.slice(7, 11), 10);
+  if (m < 3) { m += 12; y--; }
+  const dow = (d + Math.floor(13 * (m + 1) / 5) + y + Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400)) % 7;
+  // Zeller: 0=Sat, 1=Sun, 2=Mon, ...6=Fri → convert to JS: 0=Sun
+  return (dow + 6) % 7; // 0=Sun, 1=Mon, ...6=Sat
+}
+
+function getLangFromUrl(url) {
+  const path = url.split('?')[0];
+  const langMatch = path.match(LANG_PREFIX);
+  if (langMatch) return langMatch[1];
+  return 'en';
 }
 
 async function main() {
@@ -149,20 +184,17 @@ async function main() {
   const files = (await readdir(LOGS_DIR)).filter(f => f.endsWith('.gz')).sort();
   console.log(`Found ${files.length} gz files`);
 
-  // Aggregation state
+  // ===== ORIGINAL aggregation state =====
   let totalRequests = 0;
   const uniqueUrls = new Set();
-  let maxUrls = 100000; // cap to avoid OOM
+  let maxUrls = 100000;
   const requestsByDay = {};
   const statusCodes = {};
   const globalRT = new ReservoirStats(2000);
 
-  // Clusters
   const clusters = {};
-  // Errors
   const errors404 = {};
   const errors500 = {};
-  // Bots
   const bots = {};
   for (const bp of BOT_PATTERNS) bots[bp.name] = { requests: 0, topPages: {}, byDay: {} };
   bots.other = { requests: 0, topPages: {}, byDay: {} };
@@ -173,6 +205,45 @@ async function main() {
   let minDate = 'Z', maxDate = '';
   let lineCount = 0;
   let parseErrors = 0;
+
+  // ===== NEW aggregation state =====
+
+  // A. Redirect Analysis
+  const redirectByPattern = {};  // pattern -> { count, botCount, humanCount }
+  const redirectByStatus = { '301': 0, '302': 0, '307': 0 };
+
+  // B. 410 Gone
+  const gone410ByPattern = {};   // pattern -> { count, botCount, examples: Set }
+  let gone410GooglebotCount = 0;
+  let gone410Total = 0;
+
+  // C. Crawl Budget (Googlebot)
+  let googlebotTotal = 0;
+  let googlebotUseful = 0;      // 200 on non-static
+  let googlebotRedirects = 0;
+  let googlebot404 = 0;
+  let googlebot410 = 0;
+  let googlebotStatic = 0;
+
+  // D. Checkout Funnel
+  let checkoutTotal = 0;
+  const checkoutByStatus = {};
+  const checkoutByDay = {};      // date -> { requests, success200 }
+  const checkoutVINs = new Set();
+  let maxVINs = 100000;
+
+  // E. Language Split
+  const langStats = {};          // lang -> { requests, ok200, err404, botCount }
+
+  // F. Heatmap: [dayOfWeek 0-6][hour 0-23] -> { rtSum, rtCount, reqCount }
+  const heatmap = Array.from({ length: 7 }, () =>
+    Array.from({ length: 24 }, () => ({ rtSum: 0, rtCount: 0, reqCount: 0 }))
+  );
+  const dowCache = {}; // date string -> day of week
+
+  // G. Suspicious: UA tracking
+  const uaStats = {};            // full UA -> { count, errorCount }
+  let maxUAs = 5000;
 
   for (const file of files) {
     const filePath = join(LOGS_DIR, file);
@@ -200,31 +271,20 @@ async function main() {
 
         totalRequests++;
 
-        // Date range
         if (date < minDate) minDate = date;
         if (date > maxDate) maxDate = date;
 
-        // Unique URLs (capped)
         if (uniqueUrls.size < maxUrls) uniqueUrls.add(url);
 
-        // By day
         requestsByDay[date] = (requestsByDay[date] || 0) + 1;
-
-        // Status codes
         statusCodes[status] = (statusCodes[status] || 0) + 1;
 
-        // Response time
         if (rt > 0) globalRT.add(rt);
 
-        // Cluster
         const cluster = classifyUrl(url);
         if (!clusters[cluster]) {
           clusters[cluster] = {
-            count: 0,
-            statuses: {},
-            rt: new ReservoirStats(500),
-            byDay: {},
-            uas: {},
+            count: 0, statuses: {}, rt: new ReservoirStats(500), byDay: {}, uas: {},
           };
         }
         const c = clusters[cluster];
@@ -233,7 +293,6 @@ async function main() {
         if (rt > 0) c.rt.add(rt);
         c.byDay[date] = (c.byDay[date] || 0) + 1;
 
-        // Top UAs per cluster (limited)
         const shortUA = shortenUA(ua);
         if (Object.keys(c.uas).length < 50) {
           c.uas[shortUA] = (c.uas[shortUA] || 0) + 1;
@@ -241,7 +300,6 @@ async function main() {
           c.uas[shortUA]++;
         }
 
-        // Errors
         if (status === '404') {
           errors404[cluster] = errors404[cluster] || { count: 0, examples: new Set() };
           errors404[cluster].count++;
@@ -252,15 +310,15 @@ async function main() {
           errors500[cluster].count++;
         }
 
-        // Bot detection
-        const bot = detectBot(ua);
-        if (bot) {
+        const botName = detectBot(ua);
+        const isBotReq = botName !== null;
+
+        if (isBotReq) {
           botRequests++;
           botRTSum += rt;
-          const b = bots[bot] || bots.other;
+          const b = bots[botName] || bots.other;
           b.requests++;
           b.byDay[date] = (b.byDay[date] || 0) + 1;
-          // Top pages (limited)
           if (Object.keys(b.topPages).length < 100) {
             b.topPages[url] = (b.topPages[url] || 0) + 1;
           } else if (b.topPages[url]) {
@@ -269,6 +327,85 @@ async function main() {
         } else {
           humanRequests++;
           humanRTSum += rt;
+        }
+
+        // ===== NEW METRICS =====
+
+        // A. Redirect Analysis
+        if (status === '301' || status === '302' || status === '307') {
+          redirectByStatus[status] = (redirectByStatus[status] || 0) + 1;
+          if (!redirectByPattern[cluster]) {
+            redirectByPattern[cluster] = { count: 0, botCount: 0, humanCount: 0 };
+          }
+          redirectByPattern[cluster].count++;
+          if (isBotReq) redirectByPattern[cluster].botCount++;
+          else redirectByPattern[cluster].humanCount++;
+        }
+
+        // B. 410 Gone
+        if (status === '410') {
+          gone410Total++;
+          if (!gone410ByPattern[cluster]) {
+            gone410ByPattern[cluster] = { count: 0, botCount: 0, examples: new Set() };
+          }
+          gone410ByPattern[cluster].count++;
+          if (isBotReq) gone410ByPattern[cluster].botCount++;
+          if (gone410ByPattern[cluster].examples.size < 5) gone410ByPattern[cluster].examples.add(url);
+          if (isGooglebot(ua)) gone410GooglebotCount++;
+        }
+
+        // C. Crawl Budget (Googlebot only)
+        if (isGooglebot(ua)) {
+          googlebotTotal++;
+          const isStaticUrl = STATIC_EXT.test(url);
+          if (isStaticUrl) {
+            googlebotStatic++;
+          } else if (status === '200') {
+            googlebotUseful++;
+          }
+          if (status === '301' || status === '302' || status === '307') googlebotRedirects++;
+          if (status === '404') googlebot404++;
+          if (status === '410') googlebot410++;
+        }
+
+        // D. Checkout Funnel
+        const checkoutMatch = url.match(CHECKOUT_RE);
+        if (checkoutMatch) {
+          checkoutTotal++;
+          checkoutByStatus[status] = (checkoutByStatus[status] || 0) + 1;
+          if (!checkoutByDay[date]) checkoutByDay[date] = { requests: 0, success200: 0 };
+          checkoutByDay[date].requests++;
+          if (status === '200') checkoutByDay[date].success200++;
+          const vin = checkoutMatch[1].toLowerCase();
+          if (checkoutVINs.size < maxVINs) checkoutVINs.add(vin);
+        }
+
+        // E. Language Split
+        const lang = getLangFromUrl(url);
+        if (!langStats[lang]) langStats[lang] = { requests: 0, ok200: 0, err404: 0, botCount: 0 };
+        langStats[lang].requests++;
+        if (status === '200') langStats[lang].ok200++;
+        if (status === '404') langStats[lang].err404++;
+        if (isBotReq) langStats[lang].botCount++;
+
+        // F. Heatmap
+        const hour = parseHour(dateStr);
+        const dateKey = dateStr.slice(0, 11);
+        let dow = dowCache[dateKey];
+        if (dow === undefined) { dow = parseDayOfWeek(dateStr); dowCache[dateKey] = dow; }
+        const cell = heatmap[dow][hour];
+        cell.reqCount++;
+        if (rt > 0) {
+          cell.rtSum += rt;
+          cell.rtCount++;
+        }
+
+        // G. Suspicious: UA tracking (simplified - no burst detection)
+        const uaKey = ua.slice(0, 150); // truncate for memory
+        if (Object.keys(uaStats).length < maxUAs || uaStats[uaKey]) {
+          if (!uaStats[uaKey]) uaStats[uaKey] = { count: 0, errorCount: 0 };
+          uaStats[uaKey].count++;
+          if (status !== '200') uaStats[uaKey].errorCount++;
         }
       });
 
@@ -282,33 +419,27 @@ async function main() {
   console.log(`\nTotal lines: ${lineCount.toLocaleString()}, parse errors: ${parseErrors}`);
   console.log(`Total valid requests: ${totalRequests.toLocaleString()}`);
 
-  // Build summary JSON
+  // ===== Build ORIGINAL summary parts =====
+
   const clusterArray = Object.entries(clusters)
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 200) // top 200 clusters
+    .slice(0, 200)
     .map(([pattern, c]) => {
       const topUAs = Object.entries(c.uas)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
         .map(([ua, count]) => ({ ua, count }));
-
       const byDay = Object.entries(c.byDay)
         .sort((a, b) => a[0].localeCompare(b[0]))
         .map(([date, count]) => ({ date, count }));
-
       const rtStats = c.rt.getStats();
-
       return {
-        pattern,
-        count: c.count,
-        statuses: c.statuses,
+        pattern, count: c.count, statuses: c.statuses,
         responseTime: { avg: rtStats.avg, p95: rtStats.p95 },
-        byDay,
-        topUAs,
+        byDay, topUAs,
       };
     });
 
-  // Errors
   const err404 = Object.entries(errors404)
     .sort((a, b) => b[1].count - a[1].count)
     .slice(0, 50)
@@ -319,7 +450,6 @@ async function main() {
     .slice(0, 50)
     .map(([pattern, e]) => ({ pattern, count: e.count }));
 
-  // Slow clusters (avg > 1s)
   const slow = Object.entries(clusters)
     .map(([pattern, c]) => {
       const stats = c.rt.getStats();
@@ -329,7 +459,6 @@ async function main() {
     .sort((a, b) => b.avgTime - a.avgTime)
     .slice(0, 50);
 
-  // Bots
   const botsOut = {};
   for (const [name, b] of Object.entries(bots)) {
     if (b.requests === 0) continue;
@@ -343,6 +472,77 @@ async function main() {
     botsOut[name] = { requests: b.requests, topPages, byDay };
   }
 
+  // ===== Build NEW summary parts =====
+
+  // A. Redirects
+  const totalRedirects = Object.values(redirectByStatus).reduce((a, b) => a + b, 0);
+  const redirectPatterns = Object.entries(redirectByPattern)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 20)
+    .map(([pattern, d]) => ({ pattern, count: d.count, botCount: d.botCount, humanCount: d.humanCount }));
+
+  // B. 410 Gone
+  const gone410Patterns = Object.entries(gone410ByPattern)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 20)
+    .map(([pattern, d]) => ({ pattern, count: d.count, examples: [...d.examples].slice(0, 5), botCount: d.botCount }));
+
+  // C. Crawl Budget
+  const wasteRedirects = googlebotRedirects;
+  const wasteNotFound = googlebot404;
+  const wasteGone = googlebot410;
+  const wasteStatic = googlebotStatic;
+  const wasteTotal = wasteRedirects + wasteNotFound + wasteGone + wasteStatic;
+  const pct = (n) => googlebotTotal > 0 ? +((n / googlebotTotal) * 100).toFixed(1) : 0;
+
+  // D. Checkout
+  const checkoutByDayArr = Object.entries(checkoutByDay)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, d]) => ({ date, requests: d.requests, success200: d.success200 }));
+
+  // E. Languages
+  const languagesArr = Object.entries(langStats)
+    .sort((a, b) => b[1].requests - a[1].requests)
+    .map(([lang, s]) => ({
+      lang,
+      requests: s.requests,
+      ok200: s.ok200,
+      err404: s.err404,
+      botPercent: s.requests > 0 ? +((s.botCount / s.requests) * 100).toFixed(1) : 0,
+    }));
+
+  // F. Heatmap
+  // Reorder: Mon=0, Tue=1 ... Sun=6 (JS Date has Sun=0)
+  const dayOrder = [1, 2, 3, 4, 5, 6, 0]; // Mon-Sun
+  const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const heatmapRT = dayOrder.map(d =>
+    Array.from({ length: 24 }, (_, h) => {
+      const cell = heatmap[d][h];
+      return cell.rtCount > 0 ? +((cell.rtSum / cell.rtCount).toFixed(3)) : 0;
+    })
+  );
+  const heatmapReqs = dayOrder.map(d =>
+    Array.from({ length: 24 }, (_, h) => heatmap[d][h].reqCount)
+  );
+
+  // G. Suspicious
+  const uaEntries = Object.entries(uaStats)
+    .map(([ua, s]) => ({
+      ua,
+      count: s.count,
+      errorRate: s.count > 0 ? +((s.errorCount / s.count) * 100).toFixed(1) : 0,
+    }));
+
+  const topUAs = [...uaEntries]
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 20);
+
+  const highErrorUAs = uaEntries
+    .filter(u => u.count > 1000 && u.errorRate > 50)
+    .sort((a, b) => b.errorRate - a.errorRate)
+    .slice(0, 20);
+
+  // ===== Final summary =====
   const summary = {
     totalRequests,
     uniqueUrls: uniqueUrls.size,
@@ -353,15 +553,50 @@ async function main() {
     statusCodes,
     responseTime: globalRT.getStats(),
     clusters: clusterArray,
-    errors: {
-      '404': err404,
-      '500': err500,
-      slow,
-    },
+    errors: { '404': err404, '500': err500, slow },
     bots: botsOut,
     botVsHuman: {
       bot: { requests: botRequests, avgResponseTime: botRequests > 0 ? +(botRTSum / botRequests).toFixed(3) : 0 },
       human: { requests: humanRequests, avgResponseTime: humanRequests > 0 ? +(humanRTSum / humanRequests).toFixed(3) : 0 },
+    },
+    // NEW SECTIONS
+    redirects: {
+      total: totalRedirects,
+      byPattern: redirectPatterns,
+      byStatus: redirectByStatus,
+    },
+    gone410: {
+      total: gone410Total,
+      googlebotRequests: gone410GooglebotCount,
+      byPattern: gone410Patterns,
+    },
+    crawlBudget: {
+      totalGooglebot: googlebotTotal,
+      useful: { count: googlebotUseful, percent: pct(googlebotUseful) },
+      waste: {
+        redirects: { count: wasteRedirects, percent: pct(wasteRedirects) },
+        notFound404: { count: wasteNotFound, percent: pct(wasteNotFound) },
+        gone410: { count: wasteGone, percent: pct(wasteGone) },
+        static: { count: wasteStatic, percent: pct(wasteStatic) },
+        total: { count: wasteTotal, percent: pct(wasteTotal) },
+      },
+    },
+    checkoutFunnel: {
+      totalRequests: checkoutTotal,
+      uniqueVINs: checkoutVINs.size,
+      byStatus: checkoutByStatus,
+      byDay: checkoutByDayArr,
+    },
+    languages: languagesArr,
+    heatmap: {
+      responseTime: heatmapRT,
+      requests: heatmapReqs,
+      hours: Array.from({ length: 24 }, (_, i) => i),
+      days: dayLabels,
+    },
+    suspicious: {
+      topUAs,
+      highErrorUAs,
     },
   };
 
