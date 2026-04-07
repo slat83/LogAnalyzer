@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
-import { loadPagesData, loadSummary } from "@/lib/data";
-import { PagesData, PageCluster, PageData, Summary } from "@/lib/types";
+import { loadPagesIndex, loadClusterPages } from "@/lib/data";
+import { PagesIndex, ClusterMeta, PageData, Summary } from "@/lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -129,15 +129,15 @@ function SummaryCard({ label, value, sub }: { label: string; value: string; sub?
 
 // ── Cluster Table ─────────────────────────────────────────────────────────────
 
-type SortKey = keyof PageCluster | "none";
+type SortKey = keyof ClusterMeta | "none";
 
 function ClusterTable({
   clusters,
   onSelect,
   botClusters,
 }: {
-  clusters: PageCluster[];
-  onSelect: (c: PageCluster) => void;
+  clusters: ClusterMeta[];
+  onSelect: (c: ClusterMeta) => void;
   botClusters: Record<string, number>;
 }) {
   const [sort, setSort]   = useState<{ key: string; dir: 1 | -1 }>({ key: "totalClicks", dir: -1 });
@@ -209,7 +209,7 @@ function ClusterTable({
               const botCount = botClusters[c.pattern] || 0;
               return (
                 <tr
-                  key={c.pattern}
+                  key={c.id}
                   onClick={() => onSelect(c)}
                   className="hover:bg-gray-800/50 cursor-pointer transition-colors"
                 >
@@ -269,19 +269,19 @@ function ClusterTable({
 
 function PageTable({
   pages,
-  clusterBots,
   onBack,
+  loading,
+  error,
 }: {
   pages: PageData[];
-  clusterBots: { ua: string; count: number }[];
   onBack: () => void;
+  loading?: boolean;
+  error?: string | null;
 }) {
   const [sort, setSort]   = useState<{ key: string; dir: 1 | -1 }>({ key: "clicks", dir: -1 });
   const [search, setSearch] = useState("");
   const [pg, setPg]       = useState(0);
   const PAGE_SIZE = 50;
-
-  type SortableRow = { [key: string]: number | string | null };
 
   function getSortVal(p: PageData, key: string): number | string {
     if (key === "clicks")      return p.gsc?.clicks      ?? -1;
@@ -329,6 +329,35 @@ function PageTable({
     );
   }
 
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button onClick={onBack} className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+            ← Back to clusters
+          </button>
+        </div>
+        <div className="text-gray-400 p-8 animate-pulse text-center">Loading cluster pages...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-3 flex-wrap">
+          <button onClick={onBack} className="text-blue-400 hover:text-blue-300 text-sm flex items-center gap-1">
+            ← Back to clusters
+          </button>
+        </div>
+        <div className="bg-red-950/30 border border-red-900/50 rounded-xl p-4 text-center">
+          <div className="text-red-400 font-medium">Error loading cluster pages</div>
+          <div className="text-red-300 text-sm mt-1">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 flex-wrap">
@@ -343,20 +372,6 @@ function PageTable({
         />
         <span className="text-xs text-gray-500">{filtered.length} pages</span>
       </div>
-
-      {/* Bot traffic for this cluster */}
-      {clusterBots.length > 0 && (
-        <div className="bg-orange-950/30 border border-orange-900/50 rounded-xl p-3">
-          <div className="text-xs font-medium text-orange-300 mb-2">🤖 Bot traffic in this cluster</div>
-          <div className="flex flex-wrap gap-2">
-            {clusterBots.slice(0, 8).map(b => (
-              <span key={b.ua} className="px-2 py-1 bg-orange-900/30 border border-orange-800/50 rounded text-xs text-orange-300">
-                {b.ua}: <span className="text-orange-200 font-medium">{fmt(b.count)}</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="overflow-x-auto rounded-xl border border-gray-800">
         <table className="w-full text-xs">
@@ -454,216 +469,49 @@ function PageTable({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PagesPage() {
-  const [data, setData]       = useState<PagesData | null>(null);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [selected, setSelected] = useState<PageCluster | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [subdomainFilter, setSubdomainFilter] = useState<string>("epicvin.com");
+  const [index, setIndex]       = useState<PagesIndex | null>(null);
+  const [selected, setSelected] = useState<ClusterMeta | null>(null);
+  const [clusterPages, setClusterPages] = useState<PageData[]>([]);
+  const [loadingIndex, setLoadingIndex] = useState(true);
+  const [loadingPages, setLoadingPages] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([loadPagesData(), loadSummary()]).then(([pd, sm]) => {
-      setData(pd);
-      setSummary(sm);
-      setLoading(false);
+    loadPagesIndex().then(data => {
+      setIndex(data);
+      setLoadingIndex(false);
     });
   }, []);
 
-  // Reset selected cluster when filter changes
-  useEffect(() => {
-    setSelected(null);
-  }, [subdomainFilter]);
+  async function handleSelectCluster(cluster: ClusterMeta) {
+    setSelected(cluster);
+    setLoadingPages(true);
+    setPageError(null);
+    setClusterPages([]);
 
-  // Count pages per subdomain
-  const subdomainCounts = useMemo(() => {
-    if (!data) return {} as Record<string, number>;
-    const counts: Record<string, number> = {};
-    for (const page of data.pages) {
-      const host = getHostname(page.url);
-      counts[host] = (counts[host] || 0) + 1;
-    }
-    return counts;
-  }, [data]);
-
-  // Sorted list of subdomains (by page count desc)
-  const subdomains = useMemo(() => {
-    return Object.entries(subdomainCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([host]) => host);
-  }, [subdomainCounts]);
-
-  // Pages filtered by selected subdomain + deduplicated by normalized path
-  const filteredPages = useMemo(() => {
-    if (!data) return [] as PageData[];
-    const raw = subdomainFilter === "all" ? data.pages : data.pages.filter(p => getHostname(p.url) === subdomainFilter);
-
-    // Deduplicate: group by hostname + pathname (strip query/fragment)
-    const groups = new Map<string, PageData[]>();
-    for (const page of raw) {
-      let key: string;
-      try {
-        const u = new URL(page.url);
-        key = u.hostname + u.pathname;
-      } catch {
-        key = page.url;
+    try {
+      const data = await loadClusterPages(cluster.id + ".json");
+      if (data) {
+        setClusterPages(data.pages);
+      } else {
+        setPageError("No data returned from cluster file");
       }
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(page);
+    } catch (err) {
+      setPageError(err instanceof Error ? err.message : "Failed to load cluster pages");
+    } finally {
+      setLoadingPages(false);
     }
-
-    // Merge each group into one page
-    return Array.from(groups.values()).map(group => {
-      if (group.length === 1) return group[0];
-
-      const base = group[0];
-      // Sum GSC metrics
-      const totalClicks = group.reduce((s, p) => s + (p.gsc?.clicks ?? 0), 0);
-      const totalImpressions = group.reduce((s, p) => s + (p.gsc?.impressions ?? 0), 0);
-      const withPos = group.filter(p => p.gsc?.position != null && p.gsc?.impressions);
-      const avgPosition = withPos.length > 0
-        ? withPos.reduce((s, p) => s + p.gsc!.position * p.gsc!.impressions, 0) / withPos.reduce((s, p) => s + p.gsc!.impressions, 0)
-        : base.gsc?.position ?? null;
-
-      return {
-        ...base,
-        // Canonical URL (without query)
-        url: (() => { try { const u = new URL(base.url); return u.origin + u.pathname; } catch { return base.url; } })(),
-        path: (() => { try { return new URL(base.url).pathname; } catch { return base.path; } })(),
-        gsc: totalClicks > 0 || totalImpressions > 0 ? {
-          clicks: totalClicks,
-          impressions: totalImpressions,
-          ctr: totalImpressions > 0 ? totalClicks / totalImpressions : 0,
-          position: avgPosition ?? 0,
-        } : base.gsc,
-        // GA4 stays from base (already by path, no duplication)
-        urlVariants: group.length,
-      } as PageData;
-    });
-  }, [data, subdomainFilter]);
-
-  // Recalculate clusters from filtered pages
-  const filteredClusters = useMemo(() => {
-    if (!data) return [];
-    if (subdomainFilter === "all") return data.clusters;
-
-    // Group filtered pages by cluster pattern
-    const clusterMap = new Map<string, PageData[]>();
-    for (const page of filteredPages) {
-      if (!clusterMap.has(page.cluster)) clusterMap.set(page.cluster, []);
-      clusterMap.get(page.cluster)!.push(page);
-    }
-
-    return data.clusters
-      .filter(c => clusterMap.has(c.pattern))
-      .map(c => {
-        const pages = clusterMap.get(c.pattern)!;
-        const totalClicks      = pages.reduce((s, p) => s + (p.gsc?.clicks      ?? 0), 0);
-        const totalImpressions = pages.reduce((s, p) => s + (p.gsc?.impressions ?? 0), 0);
-        const totalSessions    = pages.reduce((s, p) => s + (p.ga4?.sessions    ?? 0), 0);
-        const totalUsers       = pages.reduce((s, p) => s + (p.ga4?.users       ?? 0), 0);
-        const totalPageviews   = pages.reduce((s, p) => s + (p.ga4?.pageviews   ?? 0), 0);
-        const totalConversions = pages.reduce((s, p) => s + (p.ga4?.conversions ?? 0), 0);
-
-        const withPos = pages.filter(p => p.gsc?.position != null);
-        const avgPosition = withPos.length > 0
-          ? withPos.reduce((s, p) => s + p.gsc!.position, 0) / withPos.length
-          : null;
-
-        const withBounce = pages.filter(p => p.ga4?.bounceRate != null);
-        const avgBounceRate = withBounce.length > 0
-          ? withBounce.reduce((s, p) => s + p.ga4!.bounceRate, 0) / withBounce.length
-          : null;
-
-        const indexedCount = pages.filter(p => p.indexing?.status === "INDEXED").length;
-        const indexedPct   = pages.length > 0 ? Math.round((indexedCount / pages.length) * 100) : 0;
-
-        return {
-          ...c,
-          pages: pages.map(p => p.url),
-          pageCount: pages.length,
-          totalClicks, totalImpressions,
-          totalSessions, totalUsers, totalPageviews, totalConversions,
-          avgPosition, avgBounceRate, indexedCount, indexedPct,
-        };
-      });
-  }, [data, filteredPages, subdomainFilter]);
-
-  // Recalculate summary from filtered pages
-  const filteredSummary = useMemo(() => {
-    if (!data) return null;
-    if (subdomainFilter === "all") return data.summary;
-
-    const pages = filteredPages;
-    const totalPages    = pages.length;
-    const totalClusters = new Set(pages.map(p => p.cluster)).size;
-    const totalClicks   = pages.reduce((s, p) => s + (p.gsc?.clicks    ?? 0), 0);
-    const totalSessions = pages.reduce((s, p) => s + (p.ga4?.sessions  ?? 0), 0);
-
-    const withPos = pages.filter(p => p.gsc?.position != null);
-    const avgPosition = withPos.length > 0
-      ? withPos.reduce((s, p) => s + p.gsc!.position, 0) / withPos.length
-      : null;
-
-    const indexed    = pages.filter(p => p.indexing?.status === "INDEXED").length;
-    const indexedPct = totalPages > 0 ? Math.round((indexed / totalPages) * 100) : null;
-
-    const withBounce = pages.filter(p => p.ga4?.bounceRate != null);
-    const avgBounceRate = withBounce.length > 0
-      ? withBounce.reduce((s, p) => s + p.ga4!.bounceRate, 0) / withBounce.length
-      : null;
-
-    return { totalPages, totalClusters, totalClicks, totalSessions, avgPosition, indexedPct, avgBounceRate };
-  }, [data, filteredPages, subdomainFilter]);
-
-  // Build botClusters map from summary.json bots data
-  const botClusters = useMemo<Record<string, number>>(() => {
-    if (!summary?.bots) return {};
-    const result: Record<string, number> = {};
-    for (const [, botData] of Object.entries(summary.bots)) {
-      for (const { url, count } of botData.topPages || []) {
-        // Match URL to cluster pattern
-        let path = url;
-        try { path = new URL(url).pathname; } catch { /* use as-is */ }
-        const segments = path.split('/').filter(Boolean);
-        const cluster = segments.length >= 2
-          ? '/' + segments.slice(0, 2).join('/') + '/*'
-          : segments.length === 1 ? '/' + segments[0] : '/';
-        result[cluster] = (result[cluster] || 0) + count;
-      }
-    }
-    return result;
-  }, [summary]);
-
-  // Bot UAs for a specific cluster
-  function getClusterBots(clusterPattern: string): { ua: string; count: number }[] {
-    if (!summary?.bots) return [];
-    const uaCounts: Record<string, number> = {};
-    for (const [ua, botData] of Object.entries(summary.bots)) {
-      for (const { url, count } of botData.topPages || []) {
-        let path = url;
-        try { path = new URL(url).pathname; } catch { /* use as-is */ }
-        const segments = path.split('/').filter(Boolean);
-        const cluster = segments.length >= 2
-          ? '/' + segments.slice(0, 2).join('/') + '/*'
-          : segments.length === 1 ? '/' + segments[0] : '/';
-        if (cluster === clusterPattern) {
-          uaCounts[ua] = (uaCounts[ua] || 0) + count;
-        }
-      }
-    }
-    return Object.entries(uaCounts)
-      .map(([ua, count]) => ({ ua, count }))
-      .sort((a, b) => b.count - a.count);
   }
 
-  // Pages for selected cluster (respect subdomain filter)
-  const clusterPages = useMemo<PageData[]>(() => {
-    if (!data || !selected) return [];
-    return filteredPages.filter(p => p.cluster === selected.pattern);
-  }, [data, selected, filteredPages]);
+  function handleBack() {
+    setSelected(null);
+    setClusterPages([]);
+    setPageError(null);
+  }
 
-  if (loading) return <div className="text-gray-400 p-8 animate-pulse">Loading pages data...</div>;
+  if (loadingIndex) return <div className="text-gray-400 p-8 animate-pulse">Loading pages index...</div>;
 
-  if (!data || !filteredSummary) {
+  if (!index) {
     return (
       <div className="p-8 text-center space-y-3">
         <div className="text-4xl">📄</div>
@@ -678,7 +526,84 @@ export default function PagesPage() {
     );
   }
 
-  const s = filteredSummary;
+  const s = index.summary;
+
+  // Summary cards for cluster list
+  const summaryCards = (
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <SummaryCard
+        label="Total Pages"
+        value={fmt(s.totalPages)}
+        sub={`${fmt(s.totalClusters)} clusters`}
+      />
+      <SummaryCard
+        label="Total Sessions"
+        value={s.totalSessions >= 1_000_000
+          ? (s.totalSessions / 1_000_000).toFixed(1) + "M"
+          : fmt(s.totalSessions)}
+      />
+      <SummaryCard
+        label="Clicks (GSC)"
+        value={s.totalClicks >= 1000
+          ? (s.totalClicks / 1000).toFixed(0) + "K"
+          : fmt(s.totalClicks)}
+        sub="last 28 days"
+      />
+      <SummaryCard
+        label="Avg Position"
+        value={pos(s.avgPosition)}
+        sub="Google Search"
+      />
+      <SummaryCard
+        label="Indexed"
+        value={s.indexedPct != null ? s.indexedPct + "%" : "—"}
+        sub="top 100 URLs"
+      />
+      <SummaryCard
+        label="Avg Bounce Rate"
+        value={pct(s.avgBounceRate)}
+      />
+    </div>
+  );
+
+  // Cluster summary for drill-down view
+  const clusterSummary = selected ? (
+    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-sm">
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Pages</div>
+        <div className="text-white font-medium">{fmt(selected.pageCount)}</div>
+      </div>
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Sessions</div>
+        <div className="text-white font-medium">{fmt(selected.totalSessions)}</div>
+      </div>
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Clicks</div>
+        <div className="text-white font-medium">{fmt(selected.totalClicks)}</div>
+      </div>
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Avg Position</div>
+        <div className={`font-medium ${selected.avgPosition && selected.avgPosition <= 10 ? "text-green-400" : "text-yellow-400"}`}>
+          {pos(selected.avgPosition)}
+        </div>
+      </div>
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Bounce Rate</div>
+        <div className={`font-medium ${selected.avgBounceRate && selected.avgBounceRate > 0.7 ? "text-red-400" : "text-green-400"}`}>
+          {pct(selected.avgBounceRate)}
+        </div>
+      </div>
+      <div className="bg-gray-800/50 rounded-lg p-3">
+        <div className="text-xs text-gray-500">Indexed</div>
+        <div className={`font-medium ${selected.indexedPct >= 80 ? "text-green-400" : selected.indexedPct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
+          {selected.indexedPct}%
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // Bot clusters map (placeholder - will need summary.json if we want real bot data)
+  const botClusters: Record<string, number> = {};
 
   return (
     <div className="space-y-5">
@@ -687,7 +612,7 @@ export default function PagesPage() {
           <h2 className="text-lg md:text-2xl font-bold">
             {selected ? (
               <>
-                <button onClick={() => setSelected(null)} className="text-gray-400 hover:text-gray-200 font-normal mr-2">Pages</button>
+                <button onClick={handleBack} className="text-gray-400 hover:text-gray-200 font-normal mr-2">Pages</button>
                 <span className="text-gray-500 mr-2">/</span>
                 <span className="font-mono text-blue-400">{selected.pattern}</span>
               </>
@@ -696,127 +621,31 @@ export default function PagesPage() {
             )}
           </h2>
           <div className="text-xs text-gray-500 mt-0.5">
-            {data.dateRange.start} → {data.dateRange.end}
+            {index.dateRange.start} → {index.dateRange.end}
             {" · "}
-            Updated {new Date(data.timestamp).toLocaleDateString()}
+            Updated {new Date(index.timestamp).toLocaleDateString()}
           </div>
         </div>
       </div>
 
-      {/* Subdomain filter pills */}
-      {!selected && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-gray-500 shrink-0">Subdomain:</span>
-          <button
-            onClick={() => setSubdomainFilter("all")}
-            className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-              subdomainFilter === "all"
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
-            }`}
-          >
-            All ({fmt(data.pages.length)})
-          </button>
-          {subdomains.map(host => (
-            <button
-              key={host}
-              onClick={() => setSubdomainFilter(host)}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
-                subdomainFilter === host
-                  ? "bg-blue-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700"
-              }`}
-            >
-              {host} ({fmt(subdomainCounts[host])})
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Summary cards — recalculate on filter change */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryCard
-          label="Total Pages"
-          value={fmt(s.totalPages)}
-          sub={`${fmt(s.totalClusters)} clusters`}
-        />
-        <SummaryCard
-          label="Total Sessions"
-          value={s.totalSessions >= 1_000_000
-            ? (s.totalSessions / 1_000_000).toFixed(1) + "M"
-            : fmt(s.totalSessions)}
-        />
-        <SummaryCard
-          label="Clicks (GSC)"
-          value={s.totalClicks >= 1000
-            ? (s.totalClicks / 1000).toFixed(0) + "K"
-            : fmt(s.totalClicks)}
-          sub="last 28 days"
-        />
-        <SummaryCard
-          label="Avg Position"
-          value={pos(s.avgPosition)}
-          sub="Google Search"
-        />
-        <SummaryCard
-          label="Indexed"
-          value={s.indexedPct != null ? s.indexedPct + "%" : "—"}
-          sub="top 100 URLs"
-        />
-        <SummaryCard
-          label="Avg Bounce Rate"
-          value={pct(s.avgBounceRate)}
-        />
-      </div>
+      {/* Summary cards */}
+      {selected ? clusterSummary : summaryCards}
 
       {/* Cluster or page drill-down */}
       {selected ? (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-4">
-          {/* Cluster summary row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 text-sm">
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Pages</div>
-              <div className="text-white font-medium">{fmt(selected.pageCount)}</div>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Sessions</div>
-              <div className="text-white font-medium">{fmt(selected.totalSessions)}</div>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Clicks</div>
-              <div className="text-white font-medium">{fmt(selected.totalClicks)}</div>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Avg Position</div>
-              <div className={`font-medium ${selected.avgPosition && selected.avgPosition <= 10 ? "text-green-400" : "text-yellow-400"}`}>
-                {pos(selected.avgPosition)}
-              </div>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Bounce Rate</div>
-              <div className={`font-medium ${selected.avgBounceRate && selected.avgBounceRate > 0.7 ? "text-red-400" : "text-green-400"}`}>
-                {pct(selected.avgBounceRate)}
-              </div>
-            </div>
-            <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Indexed</div>
-              <div className={`font-medium ${selected.indexedPct >= 80 ? "text-green-400" : selected.indexedPct >= 50 ? "text-yellow-400" : "text-red-400"}`}>
-                {selected.indexedPct}%
-              </div>
-            </div>
-          </div>
-
           <PageTable
             pages={clusterPages}
-            clusterBots={getClusterBots(selected.pattern)}
-            onBack={() => setSelected(null)}
+            onBack={handleBack}
+            loading={loadingPages}
+            error={pageError}
           />
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
           <ClusterTable
-            clusters={filteredClusters}
-            onSelect={setSelected}
+            clusters={index.clusters}
+            onSelect={handleSelectCluster}
             botClusters={botClusters}
           />
         </div>

@@ -184,6 +184,36 @@ export interface PagesData {
   clusters: PageCluster[];
 }
 
+// Split pages index types (for lazy loading)
+export interface ClusterMeta {
+  id: string;
+  pattern: string;
+  pageCount: number;
+  actualPageCount: number;
+  totalClicks: number;
+  totalSessions: number;
+  totalImpressions: number;
+  totalUsers: number;
+  totalPageviews: number;
+  totalConversions: number;
+  avgPosition: number;
+  avgBounceRate: number;
+  indexedCount: number;
+  indexedPct: number;
+}
+
+export interface PagesIndex {
+  timestamp: string;
+  dateRange: { start: string; end: string };
+  summary: PagesSummary;
+  clusters: ClusterMeta[];
+}
+
+export interface ClusterData {
+  pattern: string;
+  pages: PageData[];
+}
+
 // Schema AI Analysis types
 export interface SchemaAIIssue {
   severity: "error" | "warning" | "info";

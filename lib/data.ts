@@ -1,5 +1,5 @@
 "use client";
-import { Summary, SchemaState, SchemaHistoryEntry, SchemaAIAnalysis, PagesData } from "./types";
+import { Summary, SchemaState, SchemaHistoryEntry, SchemaAIAnalysis, PagesData, PagesIndex, ClusterData } from "./types";
 
 let cached: Summary | null = null;
 
@@ -61,6 +61,35 @@ export async function loadPagesData(): Promise<PagesData | null> {
     if (!res.ok) return null;
     cachedPagesData = await res.json();
     return cachedPagesData;
+  } catch {
+    return null;
+  }
+}
+
+let cachedPagesIndex: PagesIndex | null = null;
+
+export async function loadPagesIndex(): Promise<PagesIndex | null> {
+  if (cachedPagesIndex) return cachedPagesIndex;
+  try {
+    const res = await fetch("/data/pages/index.json");
+    if (!res.ok) return null;
+    cachedPagesIndex = await res.json();
+    return cachedPagesIndex;
+  } catch {
+    return null;
+  }
+}
+
+const cachedClusterPages: Map<string, ClusterData> = new Map();
+
+export async function loadClusterPages(file: string): Promise<ClusterData | null> {
+  if (cachedClusterPages.has(file)) return cachedClusterPages.get(file)!;
+  try {
+    const res = await fetch(`/data/pages/${file}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    cachedClusterPages.set(file, data);
+    return data;
   } catch {
     return null;
   }
