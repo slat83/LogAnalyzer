@@ -40,12 +40,12 @@ export async function GET(
     gone410Res,
     langsRes,
   ] = await Promise.all([
-    supabase.from("clusters").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
-    supabase.from("error_entries").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
-    supabase.from("bot_stats").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
-    supabase.from("redirect_patterns").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
-    supabase.from("gone410_patterns").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
-    supabase.from("language_stats").select("*").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("clusters").select("id, pattern, request_count, statuses, rt_avg, rt_p95").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("error_entries").select("error_type, pattern, request_count, avg_time, examples").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("bot_stats").select("id, bot_name, request_count, top_pages").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("redirect_patterns").select("pattern, request_count, bot_count, human_count").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("gone410_patterns").select("pattern, request_count, bot_count, examples").eq("run_id", runId).order("request_count", { ascending: false }),
+    supabase.from("language_stats").select("lang, request_count, ok_200, err_404, bot_percent").eq("run_id", runId).order("request_count", { ascending: false }),
   ]);
 
   // 3. Fetch cluster daily and UAs for each cluster
@@ -55,8 +55,8 @@ export async function GET(
 
   if (clusterIds.length > 0) {
     const [dailyRes, uaRes] = await Promise.all([
-      supabase.from("cluster_daily").select("*").in("cluster_id", clusterIds).order("day"),
-      supabase.from("cluster_user_agents").select("*").in("cluster_id", clusterIds).order("request_count", { ascending: false }),
+      supabase.from("cluster_daily").select("cluster_id, day, request_count").in("cluster_id", clusterIds).order("day").range(0, 19999),
+      supabase.from("cluster_user_agents").select("cluster_id, user_agent, request_count").in("cluster_id", clusterIds).order("request_count", { ascending: false }).range(0, 9999),
     ]);
 
     // Group daily by cluster_id
@@ -86,9 +86,10 @@ export async function GET(
   if (botIds.length > 0) {
     const botDailyRes = await supabase
       .from("bot_daily")
-      .select("*")
+      .select("bot_id, day, request_count")
       .in("bot_id", botIds)
-      .order("day");
+      .order("day")
+      .range(0, 4999);
 
     for (const row of botDailyRes.data || []) {
       const arr = botDailyMap.get(row.bot_id) || [];
