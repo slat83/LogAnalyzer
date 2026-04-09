@@ -22,6 +22,19 @@ function parseSection(rows: { data: Record<string, unknown> }[]): Record<string,
   });
 }
 
+/** Find value in a row by keyword matching on keys (handles Russian/English). */
+function getVal(r: Record<string, string>, ...keywords: string[]): string {
+  const key = Object.keys(r).find((k) => {
+    const kl = k.toLowerCase();
+    return keywords.some((kw) => kl.includes(kw.toLowerCase()));
+  });
+  return key ? r[key] : "";
+}
+
+function getDate(r: Record<string, string>): string {
+  return getVal(r, "дата", "date", "Дата") || Object.values(r)[0] || "";
+}
+
 function DarkTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
@@ -54,65 +67,85 @@ export default function CrawlStatsDashboard() {
 
   // Crawl Stats: daily chart
   const crawlChartKey = Object.keys(crawlData).find((k) => k.includes("диаграмма") || k.includes("Сводная"));
-  const crawlChart = parseSection(crawlData[crawlChartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], requests: num(vals[1]), downloadGB: Math.round(num(vals[2]) / 1e9 * 100) / 100, responseMs: num(vals[3]) };
-  }).filter((r) => r.requests > 0);
+  const crawlChart = parseSection(crawlData[crawlChartKey || ""] || []).map((r) => ({
+    date: getDate(r),
+    requests: num(getVal(r, "запрос", "request")),
+    downloadGB: Math.round(num(getVal(r, "скачивание", "download", "размер")) / 1e9 * 100) / 100,
+    responseMs: num(getVal(r, "ответ", "response")),
+  })).filter((r) => r.requests > 0);
 
-  // Hosts
+  // Hosts — 2-column table: host name + requests + status
   const hostsKey = Object.keys(crawlData).find((k) => k.includes("хост"));
-  const hosts = parseSection(crawlData[hostsKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { name: vals[0], requests: num(vals[1]), status: vals[2] || "" };
-  }).filter((h) => h.requests > 0).sort((a, b) => b.requests - a.requests);
+  const hosts = parseSection(crawlData[hostsKey || ""] || []).map((r) => ({
+    name: getVal(r, "хост", "host") || Object.values(r)[0],
+    requests: num(getVal(r, "запрос", "request") || Object.values(r)[1]),
+    status: getVal(r, "статус", "status") || Object.values(r)[2] || "",
+  })).filter((h) => h.requests > 0).sort((a, b) => b.requests - a.requests);
 
-  // Response codes
+  // Response codes — 2-column: name + percentage
   const respKey = Object.keys(crawlData).find((k) => k.includes("ответу") || k.includes("response"));
   const responseCodes = parseSection(crawlData[respKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { name: String(vals[0]).replace(/\(.*?\)/g, "").trim().substring(0, 25), value: pct(vals[1]) };
+    const keys = Object.keys(r);
+    const nameKey = keys.find((k) => k.toLowerCase().includes("ответ") || k.toLowerCase().includes("http") || k.toLowerCase().includes("response")) || keys[0];
+    const valKey = keys.find((k) => k.toLowerCase().includes("доля") || k.toLowerCase().includes("share") || k.toLowerCase().includes("%")) || keys[1];
+    return { name: String(r[nameKey] || "").replace(/\(.*?\)/g, "").trim().substring(0, 25), value: pct(r[valKey]) };
   }).filter((r) => r.value > 0);
 
-  // File types
+  // File types — 2-column
   const fileTypeKey = Object.keys(crawlData).find((k) => k.includes("файл"));
   const fileTypes = parseSection(crawlData[fileTypeKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { name: String(vals[0]).substring(0, 20), value: pct(vals[1]) };
+    const keys = Object.keys(r);
+    const nameKey = keys.find((k) => k.toLowerCase().includes("тип") || k.toLowerCase().includes("type")) || keys[0];
+    const valKey = keys.find((k) => k.toLowerCase().includes("доля") || k.toLowerCase().includes("share")) || keys[1];
+    return { name: String(r[nameKey] || "").substring(0, 20), value: pct(r[valKey]) };
   }).filter((r) => r.value > 0);
 
-  // Bot types
+  // Bot types — 2-column
   const botKey = Object.keys(crawlData).find((k) => k.includes("робот") || k.includes("Googlebot"));
   const botTypes = parseSection(crawlData[botKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { name: String(vals[0]).substring(0, 20), value: pct(vals[1]) };
+    const keys = Object.keys(r);
+    const nameKey = keys.find((k) => k.toLowerCase().includes("тип") || k.toLowerCase().includes("робот") || k.toLowerCase().includes("bot")) || keys[0];
+    const valKey = keys.find((k) => k.toLowerCase().includes("доля") || k.toLowerCase().includes("share")) || keys[1];
+    return { name: String(r[nameKey] || "").substring(0, 20), value: pct(r[valKey]) };
   }).filter((r) => r.value > 0);
 
-  // Purpose
+  // Purpose — 2-column
   const purposeKey = Object.keys(crawlData).find((k) => k.includes("цели") || k.includes("purpose"));
   const purposes = parseSection(crawlData[purposeKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { name: String(vals[0]).substring(0, 20), value: pct(vals[1]) };
+    const keys = Object.keys(r);
+    return { name: String(r[keys[0]] || "").substring(0, 20), value: pct(r[keys[1]]) };
   }).filter((r) => r.value > 0);
 
   // 404 daily trend
   const resp404ChartKey = Object.keys(byRespData).find((k) => k.includes("Диаграмма"));
-  const daily404 = parseSection(byRespData[resp404ChartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], requests: num(vals[1]) };
-  }).filter((r) => r.requests > 0);
+  const daily404 = parseSection(byRespData[resp404ChartKey || ""] || []).map((r) => ({
+    date: getDate(r),
+    requests: num(getVal(r, "запрос", "request")),
+  })).filter((r) => r.requests > 0);
 
-  // Performance daily
+  // Performance daily — named keys
   const perfChartKey = Object.keys(perfData).find((k) => k.includes("Диаграмма"));
-  const perfChart = parseSection(perfData[perfChartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], clicks: num(vals[1]), impressions: num(vals[2]), ctr: parseFloat(String(vals[3]).replace("%", "")) || 0, position: parseFloat(vals[4]) || 0 };
-  }).filter((r) => r.clicks > 0);
+  const perfChart = parseSection(perfData[perfChartKey || ""] || []).map((r) => ({
+    date: getDate(r),
+    clicks: num(getVal(r, "клик", "click")),
+    impressions: num(getVal(r, "показ", "impression")),
+    ctr: parseFloat(getVal(r, "ctr").replace("%", "").replace(",", ".")) || 0,
+    position: parseFloat(getVal(r, "позиц", "position").replace(",", ".")) || 0,
+  })).filter((r) => r.clicks > 0);
 
-  // Coverage daily
+  // Coverage daily — use exact key names since "indexed" is ambiguous
   const covChartKey = Object.keys(coverageData).find((k) => k.includes("Диаграмма"));
   const covChart = parseSection(coverageData[covChartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], notIndexed: num(vals[1]), indexed: num(vals[2]), impressions: num(vals[3]) };
+    // Exact key matching to avoid "Не проиндексировано" matching "indexed"
+    const notIdxKey = Object.keys(r).find((k) => k.startsWith("Не проиндексировано") || k.toLowerCase() === "not indexed");
+    const idxKey = Object.keys(r).find((k) => k.startsWith("Проиндексированные") || (k.toLowerCase().includes("indexed") && !k.toLowerCase().includes("not")));
+    const imprKey = Object.keys(r).find((k) => k.startsWith("Показы") || k.toLowerCase().includes("impression"));
+    return {
+      date: getDate(r),
+      notIndexed: num(notIdxKey ? r[notIdxKey] : ""),
+      indexed: num(idxKey ? r[idxKey] : ""),
+      impressions: num(imprKey ? r[imprKey] : ""),
+    };
   }).filter((r) => r.indexed > 0 || r.notIndexed > 0);
 
   // CWV daily — filter by device prefix (mobile: or desktop:)
