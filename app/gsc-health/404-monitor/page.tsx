@@ -4,9 +4,11 @@ import { useGscHealthAll } from "@/lib/use-gsc-health";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 export default function Monitor404Page() {
   const { data: byRespData, loading, error } = useGscHealthAll("crawl_by_response");
+  const { from, to } = useDateRange();
   const [search, setSearch] = useState("");
 
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
@@ -35,6 +37,8 @@ export default function Monitor404Page() {
     };
   }).filter((r) => r.requests > 0);
 
+  const filteredDailyData = filterByDateRange(dailyData, "date", from, to);
+
   // Pattern breakdown
   const patterns: Record<string, number> = {};
   urls.forEach((u) => {
@@ -59,11 +63,11 @@ export default function Monitor404Page() {
         <Card title="Top Pattern" value={topPatterns[0]?.[0] || "—"} sub={`${topPatterns[0]?.[1] || 0} URLs`} />
       </div>
 
-      {dailyData.length > 0 && (
+      {filteredDailyData.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
           <h2 className="text-lg font-semibold text-white mb-4">Daily 404 Crawl Requests</h2>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={dailyData}>
+            <LineChart data={filteredDailyData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="date" tick={{ fill: "#9CA3AF", fontSize: 11 }} />
               <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} />

@@ -3,9 +3,11 @@ import { useGscHealth } from "@/lib/use-gsc-health";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 export default function SitemapsPage() {
   const { data, loading, error } = useGscHealth("sitemap");
+  const { from, to } = useDateRange();
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data.length) return <NoProject error={error} />;
 
@@ -15,7 +17,8 @@ export default function SitemapsPage() {
     submitted: (r.data.gscSubmitted as number) || 0,
     delta: (r.data.delta as number) || 0,
   }));
-  const latest = chartData[chartData.length - 1];
+  const filteredChartData = filterByDateRange(chartData, "date", from, to);
+  const latest = filteredChartData[filteredChartData.length - 1];
 
   return (
     <div className="space-y-6">
@@ -28,7 +31,7 @@ export default function SitemapsPage() {
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
         <h2 className="text-lg font-semibold text-white mb-4">URL Count Over Time</h2>
         <ResponsiveContainer width="100%" height={300}>
-          <LineChart data={chartData}>
+          <LineChart data={filteredChartData}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
             <XAxis dataKey="date" tick={{ fill: "#9CA3AF", fontSize: 11 }} />
             <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} />

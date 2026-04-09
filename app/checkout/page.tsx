@@ -6,11 +6,13 @@ import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   LineChart, Line, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 const COLORS = ["#10b981", "#3b82f6", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"];
 
 export default function CheckoutPage() {
   const { data, error, loading } = useSummary();
+  const { from, to } = useDateRange();
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data) return <NoProject error={error} />;
 
@@ -23,7 +25,7 @@ export default function CheckoutPage() {
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => ({ name: `Status ${code}`, value: count }));
 
-  const byDayData = cf.byDay.map(d => ({
+  const byDayData = filterByDateRange(cf.byDay, "date", from, to).map(d => ({
     ...d,
     successRate: d.requests > 0 ? +((d.success200 / d.requests) * 100).toFixed(1) : 0,
   }));

@@ -8,9 +8,11 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   LineChart, Line,
 } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 export default function ClustersPage() {
   const { data, error, loading } = useSummary();
+  const { from, to } = useDateRange();
   const [selected, setSelected] = useState<Cluster | null>(null);
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data) return <NoProject error={error} />;
@@ -59,7 +61,7 @@ export default function ClustersPage() {
           <div>
             <h4 className="text-xs md:text-sm text-gray-400 mb-2">Requests by Day</h4>
             <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={selected.byDay}>
+              <LineChart data={filterByDateRange(selected.byDay, "date", from, to)}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} width={40} />

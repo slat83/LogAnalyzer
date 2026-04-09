@@ -6,9 +6,11 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar,
 } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 export default function BotsPage() {
   const { data, error, loading } = useSummary();
+  const { from, to } = useDateRange();
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data) return <NoProject error={error} />;
 
@@ -53,7 +55,7 @@ export default function BotsPage() {
           <div>
             <h4 className="text-xs md:text-sm text-gray-400 mb-2">Googlebot Requests by Day</h4>
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={google.byDay}>
+              <LineChart data={filterByDateRange(google.byDay, "date", from, to)}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                 <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} />
                 <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} width={40} />

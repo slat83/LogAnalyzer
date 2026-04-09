@@ -4,6 +4,7 @@ import { useGscHealthAll } from "@/lib/use-gsc-health";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 const num = (v: unknown) => parseInt(String(v || "0").replace(/[\s\u00a0]/g, "")) || 0;
 
@@ -33,6 +34,7 @@ function DarkTooltip({ active, payload, label }: { active?: boolean; payload?: {
 
 export default function CwvPage() {
   const { data, loading, error } = useGscHealthAll("core_web_vitals");
+  const { from, to } = useDateRange();
   const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
 
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
@@ -59,6 +61,8 @@ export default function CwvPage() {
     };
   }).filter((r) => r.good > 0 || r.poor > 0 || r.needsImprovement > 0);
 
+  const filteredChartData = filterByDateRange(chartData, "date", from, to);
+
   // Issues
   const issuesKey = Object.keys(data).find((k) => k.startsWith(prefix) && (k.includes("Таблица") || k.includes("Table")))
     || Object.keys(data).find((k) => k.includes("Таблица"));
@@ -67,7 +71,7 @@ export default function CwvPage() {
     return { level: vals[0] || "", issue: String(vals[1] || "").replace(/&quot;/g, '"'), status: vals[2] || "", urls: num(vals[3]) };
   }).filter((iss) => iss.issue);
 
-  const latest = chartData[chartData.length - 1];
+  const latest = filteredChartData[filteredChartData.length - 1];
   const total = latest ? latest.good + latest.needsImprovement + latest.poor : 0;
 
   return (
@@ -88,7 +92,7 @@ export default function CwvPage() {
         )}
       </div>
 
-      {chartData.length > 0 ? (
+      {filteredChartData.length > 0 ? (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card title="Good" value={latest ? String(latest.good) : "—"} sub={total > 0 ? `${Math.round((latest?.good || 0) / total * 100)}%` : ""} />
@@ -102,7 +106,7 @@ export default function CwvPage() {
               CWV Trend ({device === "mobile" ? "Mobile" : "Desktop"})
             </h2>
             <ResponsiveContainer width="100%" height={350}>
-              <AreaChart data={chartData}>
+              <AreaChart data={filteredChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                 <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
