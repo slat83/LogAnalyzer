@@ -1,7 +1,15 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { parseLogFiles, type ParseProgress } from "@/lib/parser";
+
+interface ParseProgress {
+  filesProcessed: number;
+  totalFiles: number;
+  linesProcessed: number;
+  currentFile: string;
+  status: "parsing" | "done" | "error";
+  error?: string;
+}
 
 interface Props {
   projectId: string;
@@ -14,18 +22,67 @@ export default function LogUploader({ projectId, onComplete }: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const workerRef = useRef<Worker | null>(null);
 
   async function handleParse() {
     if (!files.length) return;
     setUploading(true);
     setError(null);
+    setProgress({ filesProcessed: 0, totalFiles: files.length, linesProcessed: 0, currentFile: "Reading files...", status: "parsing" });
 
     try {
-      // 1. Parse logs client-side
-      const summary = await parseLogFiles(files, [], (p) => setProgress(p));
+      // 1. Read all files as ArrayBuffers (this is fast — just reading, not parsing)
+      const fileBuffers: ArrayBuffer[] = [];
+      const fileNames: string[] = [];
+      for (const f of files) {
+        fileNames.push(f.name);
+        fileBuffers.push(await f.arrayBuffer());
+      }
 
-      // 2. Send summary to API for decomposition into DB tables
-      setProgress((prev) => prev ? { ...prev, status: "parsing", currentFile: "Uploading to database..." } : null);
+      // 2. Parse in Web Worker (off main thread — UI stays responsive)
+      const summary = await new Promise<Record<string, unknown>>((resolve, reject) => {
+        const worker = new Worker(
+          new URL("../lib/parser/worker.ts", import.meta.url),
+          { type: "module" }
+        );
+        workerRef.current = worker;
+
+        worker.onmessage = (e) => {
+          const msg = e.data;
+          if (msg.type === "progress") {
+            setProgress({
+              filesProcessed: msg.filesProcessed,
+              totalFiles: msg.totalFiles,
+              linesProcessed: msg.linesProcessed,
+              currentFile: msg.currentFile,
+              status: "parsing",
+            });
+          } else if (msg.type === "done") {
+            worker.terminate();
+            workerRef.current = null;
+            resolve(msg.summary);
+          } else if (msg.type === "error") {
+            worker.terminate();
+            workerRef.current = null;
+            reject(new Error(msg.error));
+          }
+        };
+
+        worker.onerror = (e) => {
+          worker.terminate();
+          workerRef.current = null;
+          reject(new Error(e.message || "Worker error"));
+        };
+
+        // Transfer ArrayBuffers to worker (zero-copy)
+        worker.postMessage(
+          { type: "parse", fileBuffers, fileNames, customRules: [] },
+          fileBuffers
+        );
+      });
+
+      // 3. Send summary to API
+      setProgress((prev) => prev ? { ...prev, currentFile: "Uploading to database..." } : null);
 
       const res = await fetch(`/api/projects/${projectId}/analysis`, {
         method: "POST",
