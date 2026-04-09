@@ -120,16 +120,34 @@ export default function CrawlStatsDashboard() {
   const cwvChartKey = Object.keys(cwvData).find((k) => k.startsWith(cwvPrefix) && (k.includes("Диаграмма") || k.includes("Chart")))
     || Object.keys(cwvData).find((k) => k.includes("Диаграмма")); // fallback for old data without prefix
   const cwvChart = parseSection(cwvData[cwvChartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], poor: num(vals[1]), needsImprovement: num(vals[2]), good: num(vals[3]) };
-  }).filter((r) => r.good > 0 || r.poor > 0);
+    // Match by key name — NOT positional, JSON key order varies
+    const findVal = (keywords: string[]) => {
+      const key = Object.keys(r).find((k) => keywords.some((kw) => k.toLowerCase().includes(kw)));
+      return key ? num(r[key]) : 0;
+    };
+    return {
+      date: r["Дата"] || r["Date"] || Object.values(r)[0],
+      poor: findVal(["низкая", "poor"]),
+      needsImprovement: findVal(["увеличить", "needs", "improvement"]),
+      good: findVal(["хорошо", "good"]),
+    };
+  }).filter((r) => r.good > 0 || r.poor > 0 || r.needsImprovement > 0);
 
   // CWV issues for selected device
   const cwvIssuesKey = Object.keys(cwvData).find((k) => k.startsWith(cwvPrefix) && (k.includes("Таблица") || k.includes("Table")))
     || Object.keys(cwvData).find((k) => k.includes("Таблица"));
   const cwvIssues = parseSection(cwvData[cwvIssuesKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { level: vals[0] || "", issue: String(vals[1] || "").replace(/&quot;/g, '"'), status: vals[2] || "", urls: num(vals[3]) };
+    // Use key matching for issues too
+    const findStr = (keywords: string[]) => {
+      const key = Object.keys(r).find((k) => keywords.some((kw) => k.toLowerCase().includes(kw)));
+      return key ? String(r[key]) : "";
+    };
+    return {
+      level: findStr(["уровень", "level"]) || Object.values(r)[0] || "",
+      issue: (findStr(["проблема", "issue", "problem"]) || Object.values(r)[1] || "").replace(/&quot;/g, '"'),
+      status: findStr(["проверка", "validation", "status"]) || Object.values(r)[2] || "",
+      urls: num(findStr(["url", "адрес", "страниц"]) || Object.values(r)[3]),
+    };
   }).filter((iss) => iss.urls > 0);
 
   // Check which devices have data

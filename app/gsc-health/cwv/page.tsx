@@ -46,9 +46,18 @@ export default function CwvPage() {
   const chartKey = Object.keys(data).find((k) => k.startsWith(prefix) && (k.includes("Диаграмма") || k.includes("Chart")))
     || Object.keys(data).find((k) => k.includes("Диаграмма"));
   const chartData = parseSection(data[chartKey || ""] || []).map((r) => {
-    const vals = Object.values(r);
-    return { date: vals[0], poor: num(vals[1]), needsImprovement: num(vals[2]), good: num(vals[3]) };
-  }).filter((r) => r.good > 0 || r.poor > 0);
+    // Match by key name (Russian or English) — NOT positional, since JSON key order varies
+    const findVal = (keywords: string[]) => {
+      const key = Object.keys(r).find((k) => keywords.some((kw) => k.toLowerCase().includes(kw)));
+      return key ? num(r[key]) : 0;
+    };
+    return {
+      date: r["Дата"] || r["Date"] || Object.values(r)[0],
+      poor: findVal(["низкая", "poor"]),
+      needsImprovement: findVal(["увеличить", "needs", "improvement"]),
+      good: findVal(["хорошо", "good"]),
+    };
+  }).filter((r) => r.good > 0 || r.poor > 0 || r.needsImprovement > 0);
 
   // Issues
   const issuesKey = Object.keys(data).find((k) => k.startsWith(prefix) && (k.includes("Таблица") || k.includes("Table")))
