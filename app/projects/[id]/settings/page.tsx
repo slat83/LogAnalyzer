@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import LogUploader from "@/components/LogUploader";
+import CsvUploader from "@/components/CsvUploader";
 import { useProject } from "@/lib/project-context";
 import { clearSummaryCache } from "@/lib/data";
 
@@ -317,6 +318,9 @@ export default function ProjectSettingsPage() {
 
       {/* Log Upload */}
       <LogUploader projectId={projectId} onComplete={() => { setProjectId(projectId); clearSummaryCache(); }} />
+
+      {/* GSC CSV Upload */}
+      <CsvUploader projectId={projectId} />
 
       {/* Credentials */}
       <div>
