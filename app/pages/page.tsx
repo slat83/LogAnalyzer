@@ -468,6 +468,75 @@ function PageTable({
   );
 }
 
+// ── Empty State with Enrich Button ───────────────────────────────────────────
+
+function PagesEmptyState({ onEnriched }: { onEnriched: () => void }) {
+  const [enriching, setEnriching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  async function handleEnrich() {
+    const projectId = typeof window !== "undefined" ? localStorage.getItem("loganalyzer_active_project") : null;
+    if (!projectId) { setError("No project selected"); return; }
+
+    setEnriching(true);
+    setError(null);
+    setStatusMsg("Starting enrichment...");
+
+    try {
+      const res = await fetch(`/api/projects/${projectId}/pages/enrich`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Enrichment failed");
+
+      // Poll for completion
+      const runId = data.data.enrichmentRunId;
+      setStatusMsg("Fetching GSC & GA4 data...");
+
+      for (let i = 0; i < 120; i++) { // Poll for up to 10 minutes
+        await new Promise(r => setTimeout(r, 5000));
+        const statusRes = await fetch(`/api/projects/${projectId}/pages/status`);
+        const statusData = await statusRes.json();
+        const run = statusData.data;
+
+        if (run?.status === "completed") {
+          setStatusMsg("Done!");
+          onEnriched();
+          return;
+        } else if (run?.status === "failed") {
+          throw new Error(run.error_message || "Enrichment failed");
+        }
+        setStatusMsg(`Processing... (${Math.round(i * 5 / 60)}m elapsed)`);
+      }
+      throw new Error("Enrichment timed out");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setEnriching(false);
+      setStatusMsg(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center h-64 text-center">
+      <div className="text-4xl mb-3">📄</div>
+      <p className="text-gray-300 font-medium mb-2">No pages data yet</p>
+      <p className="text-gray-500 text-sm mb-4 max-w-md">
+        Fetch page-level data from Google Search Console and GA4.
+        Add GSC/GA4 credentials in project settings first.
+      </p>
+      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
+      {statusMsg && <p className="text-blue-400 text-sm mb-3 animate-pulse">{statusMsg}</p>}
+      <button
+        onClick={handleEnrich}
+        disabled={enriching}
+        className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+      >
+        {enriching ? "Enriching..." : "Fetch Pages Data"}
+      </button>
+    </div>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function PagesPage() {
@@ -520,18 +589,10 @@ export default function PagesPage() {
   if (loadingIndex) return <div className="text-gray-400 p-8 animate-pulse">Loading pages index...</div>;
 
   if (!index) {
-    return (
-      <div className="p-8 text-center space-y-3">
-        <div className="text-4xl">📄</div>
-        <div className="text-gray-300 font-medium">No pages data found</div>
-        <div className="text-gray-500 text-sm">
-          Run the collector script to generate data:
-        </div>
-        <code className="block bg-gray-900 rounded-lg p-3 text-green-400 text-sm mt-2">
-          Upload pages data through the project settings
-        </code>
-      </div>
-    );
+    return <PagesEmptyState onEnriched={() => {
+      setLoadingIndex(true);
+      loadPagesIndex().then(setIndex).finally(() => setLoadingIndex(false));
+    }} />;
   }
 
   const s = index.summary;

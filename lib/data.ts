@@ -66,9 +66,23 @@ export async function loadSchemaAIAnalysis(): Promise<SchemaAIAnalysis | null> {
 }
 
 export async function loadPagesIndex(): Promise<PagesIndex | null> {
-  return null;
+  const projectId = getActiveProjectId();
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`/api/projects/${projectId}/pages`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
 }
 
-export async function loadClusterPages(_file: string): Promise<ClusterData | null> {
-  return null;
+export async function loadClusterPages(file: string): Promise<ClusterData | null> {
+  const projectId = getActiveProjectId();
+  if (!projectId) return null;
+  // file comes as "clusterid.json" — strip .json suffix
+  const clusterId = file.replace(/\.json$/, "");
+  try {
+    const res = await fetch(`/api/projects/${projectId}/pages/cluster/${clusterId}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
 }
