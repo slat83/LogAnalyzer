@@ -45,6 +45,7 @@ export default function CrawlStatsDashboard() {
   const { data: coverageData, loading: l4 } = useGscHealthAll("coverage");
   const { data: cwvData, loading: l5 } = useGscHealthAll("core_web_vitals");
   const [activeTab, setActiveTab] = useState<"crawl" | "perf" | "coverage" | "cwv">("crawl");
+  const [cwvDevice, setCwvDevice] = useState<"mobile" | "desktop">("mobile");
 
   if (l1 || l2 || l3 || l4 || l5) return <div className="text-gray-400 p-8 animate-pulse">Loading dashboard...</div>;
   if (e1 || !Object.keys(crawlData).length) return <NoProject error={e1} />;
@@ -114,12 +115,26 @@ export default function CrawlStatsDashboard() {
     return { date: vals[0], notIndexed: num(vals[1]), indexed: num(vals[2]), impressions: num(vals[3]) };
   }).filter((r) => r.indexed > 0 || r.notIndexed > 0);
 
-  // CWV daily
-  const cwvChartKey = Object.keys(cwvData).find((k) => k.includes("Диаграмма"));
+  // CWV daily — filter by device prefix (mobile: or desktop:)
+  const cwvPrefix = cwvDevice + ":";
+  const cwvChartKey = Object.keys(cwvData).find((k) => k.startsWith(cwvPrefix) && (k.includes("Диаграмма") || k.includes("Chart")))
+    || Object.keys(cwvData).find((k) => k.includes("Диаграмма")); // fallback for old data without prefix
   const cwvChart = parseSection(cwvData[cwvChartKey || ""] || []).map((r) => {
     const vals = Object.values(r);
     return { date: vals[0], poor: num(vals[1]), needsImprovement: num(vals[2]), good: num(vals[3]) };
   }).filter((r) => r.good > 0 || r.poor > 0);
+
+  // CWV issues for selected device
+  const cwvIssuesKey = Object.keys(cwvData).find((k) => k.startsWith(cwvPrefix) && (k.includes("Таблица") || k.includes("Table")))
+    || Object.keys(cwvData).find((k) => k.includes("Таблица"));
+  const cwvIssues = parseSection(cwvData[cwvIssuesKey || ""] || []).map((r) => {
+    const vals = Object.values(r);
+    return { level: vals[0] || "", issue: String(vals[1] || "").replace(/&quot;/g, '"'), status: vals[2] || "", urls: num(vals[3]) };
+  }).filter((iss) => iss.urls > 0);
+
+  // Check which devices have data
+  const hasMobileCwv = Object.keys(cwvData).some((k) => k.startsWith("mobile:"));
+  const hasDesktopCwv = Object.keys(cwvData).some((k) => k.startsWith("desktop:"));
 
   // Coverage issues
   const covIssuesKey = Object.keys(coverageData).find((k) => k.includes("Критические"));
@@ -410,28 +425,64 @@ export default function CrawlStatsDashboard() {
       )}
 
       {/* ── TAB: Core Web Vitals ──────────────────────────────────────────── */}
-      {activeTab === "cwv" && cwvChart.length > 0 && (
+      {activeTab === "cwv" && (
         <div className="space-y-5">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <Card title="Good" value={latestCwv ? String(latestCwv.good) : "—"} sub={latestCwv ? `${Math.round(latestCwv.good / (latestCwv.good + latestCwv.needsImprovement + latestCwv.poor) * 100)}%` : ""} />
-            <Card title="Needs Improvement" value={latestCwv ? String(latestCwv.needsImprovement) : "—"} />
-            <Card title="Poor" value={latestCwv ? String(latestCwv.poor) : "—"} />
-          </div>
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-            <h2 className="text-lg font-semibold text-white mb-4">Core Web Vitals Trend</h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <AreaChart data={cwvChart}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
-                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
-                <Tooltip content={<DarkTooltip />} />
-                <Legend />
-                <Area type="monotone" dataKey="good" fill="#10b98130" stroke="#10b981" strokeWidth={2} name="Good" stackId="1" />
-                <Area type="monotone" dataKey="needsImprovement" fill="#f59e0b30" stroke="#f59e0b" strokeWidth={2} name="Needs Improvement" stackId="1" />
-                <Area type="monotone" dataKey="poor" fill="#ef444430" stroke="#ef4444" strokeWidth={2} name="Poor" stackId="1" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
+          {/* Device toggle */}
+          {(hasMobileCwv || hasDesktopCwv) && (
+            <div className="flex gap-1 bg-gray-800 rounded-lg p-1 w-fit">
+              <button onClick={() => setCwvDevice("mobile")} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${cwvDevice === "mobile" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>
+                📱 Mobile
+              </button>
+              <button onClick={() => setCwvDevice("desktop")} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${cwvDevice === "desktop" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>
+                🖥️ Desktop
+              </button>
+            </div>
+          )}
+
+          {cwvChart.length > 0 ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Card title="Good" value={latestCwv ? String(latestCwv.good) : "—"} sub={latestCwv ? `${Math.round(latestCwv.good / (latestCwv.good + latestCwv.needsImprovement + latestCwv.poor) * 100)}%` : ""} />
+                <Card title="Needs Improvement" value={latestCwv ? String(latestCwv.needsImprovement) : "—"} />
+                <Card title="Poor" value={latestCwv ? String(latestCwv.poor) : "—"} />
+              </div>
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <h2 className="text-lg font-semibold text-white mb-4">Core Web Vitals Trend ({cwvDevice === "mobile" ? "Mobile" : "Desktop"})</h2>
+                <ResponsiveContainer width="100%" height={300}>
+                  <AreaChart data={cwvChart}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                    <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
+                    <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
+                    <Tooltip content={<DarkTooltip />} />
+                    <Legend />
+                    <Area type="monotone" dataKey="good" fill="#10b98130" stroke="#10b981" strokeWidth={2} name="Good" stackId="1" />
+                    <Area type="monotone" dataKey="needsImprovement" fill="#f59e0b30" stroke="#f59e0b" strokeWidth={2} name="Needs Improvement" stackId="1" />
+                    <Area type="monotone" dataKey="poor" fill="#ef444430" stroke="#ef4444" strokeWidth={2} name="Poor" stackId="1" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+              {cwvIssues.length > 0 && (
+                <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                  <h3 className="text-sm font-semibold text-white mb-3">Issues ({cwvDevice === "mobile" ? "Mobile" : "Desktop"})</h3>
+                  <div className="space-y-2">
+                    {cwvIssues.map((iss, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-800/30 last:border-0">
+                        <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${iss.level.includes("Низкая") || iss.level.includes("Poor") ? "bg-red-900/50 text-red-300" : "bg-yellow-900/50 text-yellow-300"}`}>
+                          {iss.level.includes("Низкая") || iss.level.includes("Poor") ? "Poor" : "NI"}
+                        </span>
+                        <span className="text-gray-300 text-sm flex-1">{iss.issue}</span>
+                        <span className="text-gray-100 font-medium text-sm shrink-0">{iss.urls.toLocaleString()} URLs</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-gray-500 text-center py-8">
+              No {cwvDevice === "mobile" ? "mobile" : "desktop"} CWV data. Upload the corresponding CWV export.
+            </div>
+          )}
         </div>
       )}
     </div>

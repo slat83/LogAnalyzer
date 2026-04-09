@@ -136,31 +136,49 @@ export async function parseGscZip(file: File): Promise<ParsedGscReport | null> {
     return null;
   }
 
-  // Use JSZip for broader compatibility (zip.js has import issues in Next.js)
   const arrayBuffer = await file.arrayBuffer();
   const { default: JSZip } = await import("jszip");
   const zip = await JSZip.loadAsync(arrayBuffer);
 
-  const sections: { name: string; rows: { date: string; data: Record<string, unknown> }[] }[] = [];
-  let totalRows = 0;
+  // First pass: read all CSVs and detect device from metadata
+  const csvContents: { name: string; content: string }[] = [];
+  let devicePrefix = "";
 
   for (const [name, entry] of Object.entries(zip.files)) {
     if (entry.dir || !name.endsWith(".csv")) continue;
-
-    // Read as Uint8Array and decode with BOM handling
     const bytes = await entry.async("uint8array");
     let content: string;
-    // Check for UTF-8 BOM (EF BB BF)
     if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
       content = new TextDecoder("utf-8").decode(bytes.slice(3));
     } else {
       content = new TextDecoder("utf-8").decode(bytes);
     }
+    csvContents.push({ name, content });
 
-    const section = parseSingleCSV(name, content, type);
+    // Detect device type from metadata CSV (Метаданные / Metadata)
+    if (name.toLowerCase().includes("метаданн") || name.toLowerCase().includes("metadata")) {
+      const lines = content.split(/\r?\n/);
+      for (const line of lines) {
+        const lower = line.toLowerCase();
+        if (lower.includes("мобильн") || lower.includes("mobile")) { devicePrefix = "mobile:"; break; }
+        if (lower.includes("пк") || lower.includes("desktop") || lower.includes("компьютер")) { devicePrefix = "desktop:"; break; }
+      }
+    }
+  }
+
+  const sections: { name: string; rows: { date: string; data: Record<string, unknown> }[] }[] = [];
+  let totalRows = 0;
+  let label = LABELS[type];
+  if (devicePrefix) {
+    label += devicePrefix === "mobile:" ? " (Mobile)" : " (Desktop)";
+  }
+
+  for (const { name, content } of csvContents) {
+    const sectionName = devicePrefix + name.replace(/\.csv$/, "");
+    const section = parseSingleCSV(sectionName, content, type);
     sections.push(section);
     totalRows += section.rows.length;
   }
 
-  return { type, label: LABELS[type], sections, totalRows };
+  return { type, label, sections, totalRows };
 }
