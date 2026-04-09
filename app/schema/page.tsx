@@ -782,7 +782,7 @@ export default function SchemaPage() {
       <div>
         <h1 className="text-2xl font-bold text-white">🏷️ Schema Monitor</h1>
         <p className="text-gray-400 text-sm mt-1">
-          JSON-LD structured data health across epicvin.com pages
+          JSON-LD structured data health across your site pages
         </p>
       </div>
 

@@ -4,7 +4,7 @@ import { createInterface } from 'readline';
 import { readFileSync, writeFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 
-const LOGS_DIR = '/home/vlubc/.openclaw/workspace/epicvin-logs';
+const LOGS_DIR = process.env.LOGS_DIR || './logs/';
 const SUMMARY_PATH = './public/data/summary.json';
 
 // Load existing summary
@@ -19,19 +19,32 @@ const languages = {};
 const heatmap = { responseTime: {}, requests: {} };
 const suspicious = {};
 
+// Custom URL classification rules — loaded from patterns.json if it exists
+let CUSTOM_RULES = [];
+try {
+  const rulesPath = join(import.meta.dirname, '..', 'patterns.json');
+  const raw = readFileSync(rulesPath, 'utf8');
+  CUSTOM_RULES = JSON.parse(raw).map(r => ({ ...r, re: new RegExp(r.pattern, 'i') }));
+} catch { /* no custom rules — use defaults */ }
+
 function classifyUrl(url) {
   if (url.match(/\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ico|map|webp|ttf|eot)(\?|$)/i)) return 'static';
-  const langMatch = url.match(/^\/(es|fr|ru|pl|ar)\//);
+  const langMatch = url.match(/^\/(es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi)\//);
   const lang = langMatch ? langMatch[1] : 'en';
-  const cleanUrl = langMatch ? url.replace(/^\/(es|fr|ru|pl|ar)/, '') : url;
-  
-  if (cleanUrl.match(/^\/vin-decoder\/[^/]+\/[^/]+/)) return { pattern: 'vin-decoder-model', lang };
-  if (cleanUrl.match(/^\/vin-decoder\/[^/]+$/)) return { pattern: 'vin-decoder-brand', lang };
-  if (cleanUrl.match(/^\/license-plate-lookup\/[^/]+/)) return { pattern: 'lp-state', lang };
-  if (cleanUrl.match(/^\/vin-check-by-state\/[^/]+/)) return { pattern: 'vin-check-state', lang };
-  if (cleanUrl.match(/^\/check-vin-number.*\/checkout\//)) return { pattern: 'checkout', lang };
+  const cleanUrl = langMatch ? url.replace(/^\/(es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi)/, '') : url;
+
+  // Custom rules (user-defined patterns from patterns.json)
+  for (const rule of CUSTOM_RULES) {
+    if (rule.re.test(cleanUrl)) return { pattern: rule.label, lang };
+  }
+
+  if (cleanUrl.includes('/checkout/')) return { pattern: 'checkout', lang };
   if (cleanUrl.startsWith('/api/')) return { pattern: 'api', lang };
-  return { pattern: 'other', lang };
+
+  // Default: first 2 path segments
+  const segments = cleanUrl.split('/').filter(Boolean);
+  const key = segments.slice(0, 2).join('/') || 'other';
+  return { pattern: key, lang };
 }
 
 function isBot(ua) {

@@ -9,7 +9,7 @@ function getHostname(url: string): string {
   try {
     return new URL(url).hostname;
   } catch {
-    return "epicvin.com";
+    return "unknown";
   }
 }
 
@@ -54,9 +54,11 @@ function indexBadge(status: string | null | undefined): React.ReactNode {
 
 function SubdomainBadge({ url }: { url: string }) {
   const host = getHostname(url);
-  if (host === "epicvin.com") return null;
-  const label = host.replace(".epicvin.com", "");
-  const isDeactivated = host === "cars.epicvin.com";
+  // Detect subdomains: if the host has more than 2 parts (e.g., sub.example.com)
+  const parts = host.split(".");
+  if (parts.length <= 2) return null;
+  const label = parts.slice(0, -2).join(".");
+  const isDeactivated = false;
   return (
     <span
       className={`inline-block px-1.5 py-0.5 rounded text-[10px] ml-1 shrink-0 ${
@@ -526,7 +528,7 @@ export default function PagesPage() {
           Run the collector script to generate data:
         </div>
         <code className="block bg-gray-900 rounded-lg p-3 text-green-400 text-sm mt-2">
-          node ~/.openclaw/workspace/scripts/pages-data-collector.mjs
+          Upload pages data through the project settings
         </code>
       </div>
     );

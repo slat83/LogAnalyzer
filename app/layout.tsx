@@ -3,7 +3,7 @@ import "./globals.css";
 import Layout from "@/components/Layout";
 
 export const metadata: Metadata = {
-  title: "EpicVin Log Analyzer",
+  title: "LogAnalyzer",
   description: "Access log analysis dashboard",
 };
 

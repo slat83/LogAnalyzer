@@ -9,12 +9,10 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
+import { join } from 'path';
 import { createHash } from 'crypto';
 
-const HOME = homedir();
-const DASH_DIR = join(HOME, '.openclaw/workspace/epicvin-log-analyzer/public/data');
+const DASH_DIR = join(import.meta.dirname, '..', 'public', 'data');
 const SOURCE_FILE = join(DASH_DIR, 'pages-data.json');
 const PAGES_DIR = join(DASH_DIR, 'pages');
 

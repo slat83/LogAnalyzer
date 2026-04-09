@@ -3,3 +3,27 @@ node_modules/
 out/
 next-env.d.ts
 .vercel
+
+# Client data — never commit analysis results or log files
+public/data/
+*.gz
+*.log
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# TypeScript build cache
+tsconfig.tsbuildinfo

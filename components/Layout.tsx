@@ -58,7 +58,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-gray-950 text-gray-100">
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-56 bg-gray-900 border-r border-gray-800 p-4 flex-col gap-0 shrink-0">
-        <h1 className="text-lg font-bold text-white mb-2 px-2">🚗 EpicVin Logs</h1>
+        <h1 className="text-lg font-bold text-white mb-2 px-2">📊 LogAnalyzer</h1>
         <NavSection title="Core" items={CORE_NAV} pathname={pathname} />
         <NavSection title="Advanced" items={ADVANCED_NAV} pathname={pathname} />
       </aside>
@@ -66,7 +66,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Mobile header + hamburger */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="md:hidden flex items-center justify-between bg-gray-900 border-b border-gray-800 px-4 py-3">
-          <h1 className="text-base font-bold text-white">🚗 EpicVin Logs</h1>
+          <h1 className="text-base font-bold text-white">📊 LogAnalyzer</h1>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             className="text-gray-300 hover:text-white p-1"

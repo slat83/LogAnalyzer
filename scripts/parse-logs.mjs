@@ -4,7 +4,7 @@ import { createGunzip } from 'zlib';
 import { createInterface } from 'readline';
 import { join } from 'path';
 
-const LOGS_DIR = '/home/vlubc/.openclaw/workspace/epicvin-logs/';
+const LOGS_DIR = process.env.LOGS_DIR || './logs/';
 const OUTPUT_DIR = join(import.meta.dirname, '..', 'public', 'data');
 const OUTPUT_FILE = join(OUTPUT_DIR, 'summary.json');
 
@@ -68,9 +68,20 @@ const STATIC_EXT = /\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico|map|webp|a
 const LANG_PREFIX = /^\/(es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi)\//;
 const LANG_PREFIXES_SET = new Set(['es','fr','ru','pl','ar','de','pt','it','nl','uk','ja','ko','zh','tr','vi']);
 
-// Checkout URL pattern - matches /check-vin-number-and-get-the-vehicle-history-report/checkout/SOMETHING
-// or with language prefix
-const CHECKOUT_RE = /(?:\/(?:es|fr|ru|pl|ar|de|pt|it|nl|uk|ja|ko|zh|tr|vi))?\/check-vin-number-and-get-the-vehicle-history-report\/checkout\/([a-z0-9]+)/i;
+// Custom URL classification rules — loaded from patterns.json if it exists
+// Each rule: { pattern: "regex", label: "cluster-name" }
+// Rules are tested in order; first match wins. Fallback: first 2 path segments.
+let CUSTOM_RULES = [];
+try {
+  const rulesPath = join(import.meta.dirname, '..', 'patterns.json');
+  const { readFileSync: readSync } = await import('fs');
+  const raw = readSync(rulesPath, 'utf8');
+  CUSTOM_RULES = JSON.parse(raw).map(r => ({ ...r, re: new RegExp(r.pattern, 'i') }));
+  console.log(`  Loaded ${CUSTOM_RULES.length} custom URL classification rules`);
+} catch { /* no custom rules — use defaults */ }
+
+// Checkout URL pattern (generic — matches any path containing /checkout/)
+const CHECKOUT_RE = /\/checkout\/([a-z0-9]+)/i;
 
 function classifyUrl(url) {
   // Static assets
@@ -86,6 +97,11 @@ function classifyUrl(url) {
     path = path.slice(langMatch[0].length - 1); // keep leading /
   }
 
+  // Custom rules (user-defined patterns)
+  for (const rule of CUSTOM_RULES) {
+    if (rule.re.test(path)) return lang + rule.label;
+  }
+
   const segments = path.split('/').filter(Boolean);
 
   // API routes
@@ -93,26 +109,9 @@ function classifyUrl(url) {
     return lang + 'api:' + (segments[1] || 'root');
   }
 
-  // checkout
-  if (segments.includes('checkout') || (segments[0] === 'check-vin-number-and-get-the-vehicle-history-report' && segments[1] === 'checkout')) {
+  // Checkout (generic)
+  if (segments.includes('checkout')) {
     return lang + 'checkout';
-  }
-
-  // vin-decoder patterns
-  if (segments[0] === 'vin-decoder') {
-    if (segments.length >= 3) return lang + 'vin-decoder-model';
-    if (segments.length === 2) return lang + 'vin-decoder-brand';
-    return lang + 'vin-decoder';
-  }
-
-  // license-plate-lookup
-  if (segments[0] === 'license-plate-lookup') {
-    return lang + 'lp-state';
-  }
-
-  // vin-check-by-state
-  if (segments[0] === 'vin-check-by-state') {
-    return lang + 'vin-check-state';
   }
 
   // Default: first 2 segments
