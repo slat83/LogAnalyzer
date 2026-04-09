@@ -161,9 +161,14 @@ export async function parseLogFiles(
 
   const STATIC_EXT = /\.(js|css|png|jpg|jpeg|gif|svg|woff|woff2|ttf|ico|map|webp|avif)(\?|$)/i;
 
+  // Yield to main thread so UI stays responsive
+  const yieldToUI = () => new Promise<void>((r) => setTimeout(r, 0));
+  const CHUNK_SIZE = 50_000; // Process 50K lines, then yield
+
   for (let fi = 0; fi < files.length; fi++) {
     const file = files[fi];
-    onProgress({ filesProcessed: fi, totalFiles: files.length, linesProcessed: totalRequests, currentFile: file.name, status: "parsing" });
+    onProgress({ filesProcessed: fi, totalFiles: files.length, linesProcessed: totalRequests, currentFile: `Decompressing ${file.name}...`, status: "parsing" });
+    await yieldToUI();
 
     // Read file as ArrayBuffer and decompress
     const buf = await file.arrayBuffer();
@@ -177,7 +182,17 @@ export async function parseLogFiles(
     }
 
     const lines = text.split("\n");
-    for (const line of lines) {
+    onProgress({ filesProcessed: fi, totalFiles: files.length, linesProcessed: totalRequests, currentFile: `Parsing ${file.name} (${lines.length.toLocaleString()} lines)...`, status: "parsing" });
+    await yieldToUI();
+
+    for (let li = 0; li < lines.length; li++) {
+      // Yield every CHUNK_SIZE lines so the browser can update UI
+      if (li > 0 && li % CHUNK_SIZE === 0) {
+        onProgress({ filesProcessed: fi, totalFiles: files.length, linesProcessed: totalRequests, currentFile: `${file.name} — ${Math.round((li / lines.length) * 100)}%`, status: "parsing" });
+        await yieldToUI();
+      }
+
+      const line = lines[li];
       if (!line.trim()) continue;
       const parsed = parseLine(line);
       if (!parsed) continue;

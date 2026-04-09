@@ -120,29 +120,57 @@ export default function LogUploader({ projectId, onComplete }: Props) {
 
       {/* Progress */}
       {progress && (
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-300">
+        <div className="space-y-3">
+          {/* File progress */}
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-300 font-medium">
               {progress.status === "done"
                 ? "Complete!"
                 : progress.currentFile || "Processing..."}
             </span>
-            <span className="text-gray-400">
+            <span className="text-blue-400 font-mono text-xs">
               {progress.linesProcessed.toLocaleString()} lines
             </span>
           </div>
-          <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all duration-300 ${
-                progress.status === "done"
-                  ? "bg-green-500"
-                  : progress.status === "error"
-                  ? "bg-red-500"
-                  : "bg-blue-600"
-              }`}
-              style={{ width: `${progress.status === "done" ? 100 : pctDone}%` }}
-            />
+
+          {/* Overall progress bar */}
+          <div>
+            <div className="flex justify-between text-xs text-gray-500 mb-1">
+              <span>File {Math.min(progress.filesProcessed + 1, progress.totalFiles)} of {progress.totalFiles}</span>
+              <span>{progress.status === "done" ? "100" : pctDone}%</span>
+            </div>
+            <div className="w-full h-3 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-150 ${
+                  progress.status === "done"
+                    ? "bg-green-500"
+                    : progress.status === "error"
+                    ? "bg-red-500"
+                    : "bg-blue-500"
+                }`}
+                style={{ width: `${progress.status === "done" ? 100 : pctDone}%` }}
+              />
+            </div>
           </div>
+
+          {/* Per-file indicators */}
+          {progress.totalFiles > 1 && (
+            <div className="flex gap-1 flex-wrap">
+              {files.map((f, i) => (
+                <div
+                  key={i}
+                  className={`h-1.5 rounded-full flex-1 min-w-[12px] transition-colors duration-300 ${
+                    i < progress.filesProcessed
+                      ? "bg-green-500"
+                      : i === progress.filesProcessed && progress.status === "parsing"
+                      ? "bg-blue-500 animate-pulse"
+                      : "bg-gray-700"
+                  }`}
+                  title={f.name}
+                />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
