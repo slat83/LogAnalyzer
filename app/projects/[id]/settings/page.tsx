@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import LogUploader from "@/components/LogUploader";
 
 interface Project {
   id: string;
@@ -290,6 +291,9 @@ export default function ProjectSettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Log Upload */}
+      <LogUploader projectId={projectId} onComplete={() => {}} />
 
       {/* Credentials */}
       <div>
