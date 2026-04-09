@@ -35,7 +35,8 @@ export default function CsvUploader({ projectId, onUploaded }: Props) {
         }
 
         results.push({ file, parsed, status: "pending" });
-      } catch {
+      } catch (e) {
+        console.error(`Failed to parse ${file.name}:`, e);
         results.push({ file, parsed: null, status: "pending" });
       }
     }

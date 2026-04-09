@@ -28,19 +28,27 @@ function parseCSVLine(line: string): string[] {
 }
 
 function parseDate(val: string): string {
-  if (!val) return new Date().toISOString().substring(0, 10);
+  const today = new Date().toISOString().substring(0, 10);
+  if (!val) return today;
   if (/^\d{4}-\d{2}-\d{2}/.test(val)) return val.substring(0, 10);
   // DD.MM.YYYY, HH:MM
   const dmy = val.match(/(\d{2})\.(\d{2})\.(\d{4})/);
   if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
   const dmy2 = val.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (dmy2) return `${dmy2[3]}-${dmy2[2]}-${dmy2[1]}`;
-  return val;
+  // Fallback: return today instead of raw unvalidated string
+  return today;
 }
 
 function cleanNumber(val: string): number {
   if (!val || val === "—" || val === "-") return 0;
-  return parseFloat(val.replace(/[\s,\u00a0%]/g, "").replace(",", ".")) || 0;
+  // Handle European decimal comma: "1,5" → "1.5", then strip thousands separators
+  let clean = val.replace(/[\s\u00a0%]/g, "");
+  // If comma is decimal separator (e.g., "3,6" not "3,600")
+  clean = clean.replace(/(\d),(\d{1,2})$/g, "$1.$2");
+  // Strip remaining commas (thousands separator)
+  clean = clean.replace(/,/g, "");
+  return parseFloat(clean) || 0;
 }
 
 function detectTypeFromFilename(filename: string): GscReportType | null {
@@ -122,30 +130,37 @@ export function parseGscCSV(csvContent: string, filename?: string): ParsedGscRep
 
 /** Parse a ZIP file containing multiple CSVs. Returns a single report with multiple sections. */
 export async function parseGscZip(file: File): Promise<ParsedGscReport | null> {
-  const { BlobReader, ZipReader, TextWriter } = await import("@zip.js/zip.js");
-
   const type = detectTypeFromFilename(file.name);
-  if (!type) return null;
+  if (!type) {
+    console.warn("Could not detect report type from filename:", file.name);
+    return null;
+  }
 
-  const reader = new ZipReader(new BlobReader(file));
-  const entries = await reader.getEntries();
+  // Use JSZip for broader compatibility (zip.js has import issues in Next.js)
+  const arrayBuffer = await file.arrayBuffer();
+  const { default: JSZip } = await import("jszip");
+  const zip = await JSZip.loadAsync(arrayBuffer);
 
   const sections: { name: string; rows: { date: string; data: Record<string, unknown> }[] }[] = [];
   let totalRows = 0;
 
-  for (const entry of entries) {
-    if (entry.directory) continue;
-    const name = entry.filename;
-    if (!name.endsWith(".csv")) continue;
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir || !name.endsWith(".csv")) continue;
 
-    const writer = new TextWriter("utf-8");
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const content = await (entry as any).getData(writer);
+    // Read as Uint8Array and decode with BOM handling
+    const bytes = await entry.async("uint8array");
+    let content: string;
+    // Check for UTF-8 BOM (EF BB BF)
+    if (bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      content = new TextDecoder("utf-8").decode(bytes.slice(3));
+    } else {
+      content = new TextDecoder("utf-8").decode(bytes);
+    }
+
     const section = parseSingleCSV(name, content, type);
     sections.push(section);
     totalRows += section.rows.length;
   }
 
-  await reader.close();
   return { type, label: LABELS[type], sections, totalRows };
 }
