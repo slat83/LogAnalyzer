@@ -55,13 +55,11 @@ export default function CsvUploader({ projectId, onUploaded }: Props) {
       setFiles([...updated]);
 
       try {
-        // Flatten all sections into rows
-        const allRows = f.parsed.sections.flatMap((s) => s.rows);
-
+        // Send sections separately for proper deduplication
         const res = await fetch(`/api/projects/${projectId}/gsc-health/upload`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ type: f.parsed.type, rows: allRows }),
+          body: JSON.stringify({ type: f.parsed.type, sections: f.parsed.sections }),
         });
 
         if (!res.ok) {

@@ -18,12 +18,18 @@ export async function GET(
     return NextResponse.json({ error: "type parameter required" }, { status: 400 });
   }
 
-  const { data, error } = await supabase
+  const section = searchParams.get("section");
+
+  let query = supabase
     .from("gsc_health_data")
-    .select("report_date, data, uploaded_at")
+    .select("report_date, section, data, uploaded_at")
     .eq("project_id", id)
     .eq("report_type", type)
     .order("report_date", { ascending: true });
+
+  if (section) query = query.eq("section", section);
+
+  const { data, error } = await query;
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ data: data || [] });

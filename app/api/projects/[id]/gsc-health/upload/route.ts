@@ -2,7 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 
-// POST /api/projects/[id]/gsc-health/upload — store parsed GSC CSV data
+/**
+ * POST /api/projects/[id]/gsc-health/upload
+ *
+ * Deduplication strategy:
+ * - Each row is keyed by (project_id, report_type, report_date, section)
+ * - On upload: delete existing rows for the same (type, section, dates), then insert
+ * - This means re-uploading the same file replaces data cleanly
+ * - Uploading a newer file with overlapping dates replaces only the overlapping dates
+ * - Different sections (e.g., Queries vs Pages from the same Performance zip) are stored separately
+ */
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -13,10 +22,14 @@ export async function POST(
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await request.json();
-  const { type, rows } = body;
+  const { type, sections } = body;
 
-  if (!type || !rows?.length) {
-    return NextResponse.json({ error: "type and rows are required" }, { status: 400 });
+  // Support both old format (flat rows) and new format (sections)
+  const sectionList: { name: string; rows: { date: string; data: Record<string, unknown> }[] }[] =
+    sections || [{ name: "default", rows: body.rows || [] }];
+
+  if (!type || !sectionList.length) {
+    return NextResponse.json({ error: "type and data are required" }, { status: 400 });
   }
 
   const admin = createAdminClient(
@@ -24,32 +37,66 @@ export async function POST(
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Upsert: delete existing data for same project+type+dates, then insert
-  const dates = [...new Set(rows.map((r: { date: string }) => r.date))];
+  let totalInserted = 0;
+  let totalReplaced = 0;
 
-  // Delete existing entries for these dates
-  for (const date of dates) {
-    await admin
+  for (const section of sectionList) {
+    if (!section.rows?.length) continue;
+
+    const sectionName = section.name.replace(/\.csv$/, "");
+    const dates = [...new Set(section.rows.map((r) => r.date))];
+
+    // Delete existing rows for this (project, type, section, dates)
+    // Use batched IN clause for efficiency
+    const { count } = await admin
       .from("gsc_health_data")
-      .delete()
+      .delete({ count: "exact" })
       .eq("project_id", id)
       .eq("report_type", type)
-      .eq("report_date", date);
+      .eq("section", sectionName)
+      .in("report_date", dates);
+
+    totalReplaced += count || 0;
+
+    // Insert new rows
+    const insertRows = section.rows.map((r) => ({
+      project_id: id,
+      report_type: type,
+      report_date: r.date,
+      section: sectionName,
+      data: r.data,
+    }));
+
+    for (let i = 0; i < insertRows.length; i += 500) {
+      const batch = insertRows.slice(i, i + 500);
+      const { error } = await admin.from("gsc_health_data").insert(batch);
+      if (error) {
+        // On unique constraint violation, try upsert row by row
+        if (error.code === "23505") {
+          for (const row of batch) {
+            await admin.from("gsc_health_data")
+              .delete()
+              .eq("project_id", row.project_id)
+              .eq("report_type", row.report_type)
+              .eq("report_date", row.report_date)
+              .eq("section", row.section);
+            await admin.from("gsc_health_data").insert(row);
+          }
+        } else {
+          return NextResponse.json({ error: error.message }, { status: 500 });
+        }
+      }
+    }
+
+    totalInserted += insertRows.length;
   }
 
-  // Insert new rows
-  const insertRows = rows.map((r: { date: string; data: Record<string, unknown> }) => ({
-    project_id: id,
-    report_type: type,
-    report_date: r.date,
-    data: r.data,
-  }));
-
-  for (let i = 0; i < insertRows.length; i += 500) {
-    const batch = insertRows.slice(i, i + 500);
-    const { error } = await admin.from("gsc_health_data").insert(batch);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  return NextResponse.json({ data: { inserted: insertRows.length, type } });
+  return NextResponse.json({
+    data: {
+      type,
+      sections: sectionList.length,
+      inserted: totalInserted,
+      replaced: totalReplaced,
+    },
+  });
 }
