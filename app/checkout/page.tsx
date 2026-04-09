@@ -17,27 +17,30 @@ export default function CheckoutPage() {
   if (error || !data) return <NoProject error={error} />;
 
   const cf = data.checkoutFunnel;
-  const successRate = cf.totalRequests > 0
-    ? (((cf.byStatus["200"] || 0) / cf.totalRequests) * 100).toFixed(1)
-    : "0";
-
-  const statusPie = Object.entries(cf.byStatus)
-    .sort((a, b) => b[1] - a[1])
-    .map(([code, count]) => ({ name: `Status ${code}`, value: count }));
-
   const byDayData = filterByDateRange(cf.byDay, "date", from, to).map(d => ({
     ...d,
     successRate: d.requests > 0 ? +((d.success200 / d.requests) * 100).toFixed(1) : 0,
   }));
+
+  // Recalculate KPIs from filtered data
+  const isFiltered = !!(from || to);
+  const filteredRequests = byDayData.reduce((s, d) => s + d.requests, 0);
+  const filteredSuccess = byDayData.reduce((s, d) => s + d.success200, 0);
+  const displayTotal = isFiltered ? filteredRequests : cf.totalRequests;
+  const displaySuccessRate = displayTotal > 0 ? ((filteredSuccess / displayTotal) * 100).toFixed(1) : "0";
+
+  const statusPie = Object.entries(cf.byStatus)
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => ({ name: `Status ${code}`, value: count }));
 
   return (
     <div className="space-y-4 md:space-y-6">
       <h2 className="text-lg md:text-2xl font-bold">🛒 Checkout Funnel</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <Card title="Total Checkout Requests" value={cf.totalRequests.toLocaleString()} />
+        <Card title="Total Checkout Requests" value={displayTotal.toLocaleString()} sub={isFiltered ? `${byDayData.length} days` : undefined} />
         <Card title="Unique VINs" value={cf.uniqueVINs.toLocaleString()} />
-        <Card title="Success Rate (200)" value={`${successRate}%`} />
+        <Card title="Success Rate (200)" value={`${displaySuccessRate}%`} />
         <Card title="200 / 301 / 403 / 404"
           value={`${(cf.byStatus["200"] || 0).toLocaleString()} / ${(cf.byStatus["301"] || 0).toLocaleString()} / ${(cf.byStatus["403"] || 0).toLocaleString()} / ${(cf.byStatus["404"] || 0).toLocaleString()}`} />
       </div>

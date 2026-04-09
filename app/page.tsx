@@ -16,12 +16,17 @@ export default function OverviewPage() {
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data) return <NoProject error={error} />;
 
-  // Apply date range filter to time-series data
+  // Apply date range filter
+  const isFiltered = !!(from || to);
   const filteredByDay = filterByDateRange(data.requestsByDay, "date", from, to);
-  // Override data references for rendering
-  const displayData = { ...data, requestsByDay: filteredByDay };
 
-  const statusData = Object.entries(displayData.statusCodes)
+  // Recalculate KPIs from filtered time-series
+  const filteredTotal = filteredByDay.reduce((s, d) => s + d.count, 0);
+  const filteredDateRange = filteredByDay.length > 0
+    ? `${filteredByDay[0].date} → ${filteredByDay[filteredByDay.length - 1].date}`
+    : `${data.dateRange.from} → ${data.dateRange.to}`;
+
+  const statusData = Object.entries(data.statusCodes)
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => ({ name: code, value: count }));
 
@@ -30,9 +35,9 @@ export default function OverviewPage() {
       <h2 className="text-lg md:text-2xl font-bold">Overview</h2>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <Card title="Total Requests" value={data.totalRequests} />
+        <Card title="Total Requests" value={isFiltered ? filteredTotal : data.totalRequests} sub={isFiltered ? `filtered from ${data.totalRequests.toLocaleString()}` : undefined} />
         <Card title="Unique URLs" value={data.uniqueUrls} sub="(capped at 100k)" />
-        <Card title="Date Range" value={`${data.dateRange.from} → ${data.dateRange.to}`} />
+        <Card title="Date Range" value={filteredDateRange} sub={isFiltered ? `${filteredByDay.length} days` : undefined} />
         <Card title="Avg Response Time" value={`${data.responseTime.avg}s`} sub={`p95: ${data.responseTime.p95}s | p99: ${data.responseTime.p99}s`} />
       </div>
 
@@ -41,7 +46,7 @@ export default function OverviewPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
           <h3 className="text-base md:text-lg font-semibold mb-3">Requests by Day</h3>
           <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={displayData.requestsByDay}>
+            <LineChart data={filteredByDay}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} />
               <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} tickFormatter={(v) => (v / 1000).toFixed(0) + "k"} width={40} />
