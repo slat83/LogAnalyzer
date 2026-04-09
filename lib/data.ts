@@ -82,7 +82,17 @@ export async function loadClusterPages(file: string): Promise<ClusterData | null
   const clusterId = file.replace(/\.json$/, "");
   try {
     const res = await fetch(`/api/projects/${projectId}/pages/cluster/${clusterId}`);
-    if (!res.ok) return null;
-    return await res.json();
-  } catch { return null; }
+    if (!res.ok) {
+      console.error(`loadClusterPages failed: ${res.status} ${res.statusText} for cluster ${clusterId}`);
+      return null;
+    }
+    const data = await res.json();
+    if (!data) {
+      console.error(`loadClusterPages: null response for cluster ${clusterId}`);
+    }
+    return data;
+  } catch (e) {
+    console.error("loadClusterPages error:", e);
+    return null;
+  }
 }
