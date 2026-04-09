@@ -34,29 +34,38 @@ export async function POST(
     .eq("project_id", id)
     .in("type", ["gsc_api", "ga4_api"]);
 
-  let gscConfig: { serviceAccountJson: string; siteUrl: string } | null = null;
-  let ga4Config: { serviceAccountJson: string; propertyId: string } | null = null;
+  // Parse credentials — support both OAuth2 (refresh_token) and service account formats
+  let gscCredJson: Record<string, unknown> | null = null;
+  let gscSiteUrl: string | null = null;
+  let ga4CredJson: Record<string, unknown> | null = null;
+  let ga4PropertyId: string | null = null;
 
   for (const c of creds || []) {
     try {
       const config = JSON.parse(decrypt(c.encrypted_config));
       if (c.type === "gsc_api") {
-        gscConfig = {
-          serviceAccountJson: config["Service Account JSON"] || config.serviceAccountJson,
-          siteUrl: config["Site URL"] || config.siteUrl || project.site_url,
-        };
+        // The stored config has the credential JSON + site URL
+        const jsonStr = config["Service Account JSON"] || config.serviceAccountJson;
+        gscCredJson = typeof jsonStr === "string" ? JSON.parse(jsonStr) : jsonStr;
+        // Also grab refresh_token if stored at top level
+        if (config.refresh_token) {
+          gscCredJson = { ...gscCredJson, refresh_token: config.refresh_token };
+        }
+        gscSiteUrl = config["Site URL"] || config.siteUrl || project.site_url;
       } else if (c.type === "ga4_api") {
-        ga4Config = {
-          serviceAccountJson: config["Service Account JSON"] || config.serviceAccountJson,
-          propertyId: config["Property ID"] || config.propertyId,
-        };
+        const jsonStr = config["Service Account JSON"] || config.serviceAccountJson;
+        ga4CredJson = typeof jsonStr === "string" ? JSON.parse(jsonStr) : jsonStr;
+        if (config.refresh_token) {
+          ga4CredJson = { ...ga4CredJson, refresh_token: config.refresh_token };
+        }
+        ga4PropertyId = config["Property ID"] || config.propertyId;
       }
     } catch (e) {
       console.error(`Failed to decrypt ${c.type} credential:`, e);
     }
   }
 
-  if (!gscConfig && !ga4Config) {
+  if (!gscCredJson && !ga4CredJson) {
     return NextResponse.json(
       { error: "No GSC or GA4 credentials found. Add them in project settings." },
       { status: 400 }
@@ -116,8 +125,10 @@ export async function POST(
       enrichmentRunId: run.id,
       projectId: id,
       siteUrl: project.site_url,
-      gscConfig,
-      ga4Config,
+      gscConfig: gscCredJson,
+      gscSiteUrl,
+      ga4Config: ga4CredJson,
+      ga4PropertyId,
       clusterPatterns,
       dateRange: { start: startDate, end: endDate },
       supabaseUrl,
