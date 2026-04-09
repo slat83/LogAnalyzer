@@ -157,6 +157,9 @@ function parseAll(fileBuffers: ArrayBuffer[], fileNames: string[], customRules: 
   const urls = new Set<string>();
   let total = 0, minDate = "9999-99-99", maxDate = "0000-00-00";
 
+  // Sample URLs per cluster (for schema scanning)
+  const clusterSampleUrls = new Map<string, string[]>();
+
   const e404: Record<string, { count: number; examples: string[] }> = {};
   const e5xx: Record<string, number> = {};
   const slow: Record<string, { sum: number; count: number }> = {};
@@ -254,6 +257,13 @@ function parseAll(fileBuffers: ArrayBuffer[], fileNames: string[], customRules: 
       const shortUa = ua.length > 40 ? ua.substring(0, 40) : ua;
       if (Object.keys(ca.uas).length < 50) ca.uas[shortUa] = (ca.uas[shortUa] || 0) + 1;
 
+      // Collect sample URLs for schema scanning (only 200 OK, non-static, non-bot)
+      if (status === 200 && !STATIC_EXT.test(url) && !isBot) {
+        const samples = clusterSampleUrls.get(cluster);
+        if (!samples) clusterSampleUrls.set(cluster, [url]);
+        else if (samples.length < 3 && !samples.includes(url)) samples.push(url);
+      }
+
       // Errors
       if (status === 404) {
         if (!e404[cluster]) e404[cluster] = { count: 0, examples: [] };
@@ -350,6 +360,7 @@ function parseAll(fileBuffers: ArrayBuffer[], fileNames: string[], customRules: 
       responseTime: { avg: crt.avg, p95: crt.p95 },
       byDay: Object.entries(ca.byDay).map(([d, c]) => ({ date: d, count: c })).sort((a, b) => a.date.localeCompare(b.date)),
       topUAs: Object.entries(ca.uas).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([u, c]) => ({ ua: u, count: c })),
+      sampleUrls: clusterSampleUrls.get(pattern)?.slice(0, 3) || [],
     };
   });
 

@@ -88,6 +88,7 @@ export async function POST(
         statuses: c.statuses,
         rt_avg: c.responseTime?.avg || 0,
         rt_p95: c.responseTime?.p95 || 0,
+        sample_urls: c.sampleUrls?.length ? c.sampleUrls : null,
       }));
 
       const { data: insertedClusters, error: cErr } = await supabase

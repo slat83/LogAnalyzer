@@ -15,6 +15,7 @@ export interface Cluster {
   responseTime: { avg: number; p95: number };
   byDay: DayCount[];
   topUAs: UACount[];
+  sampleUrls?: string[];
 }
 
 export interface ErrorEntry {

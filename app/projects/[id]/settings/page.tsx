@@ -11,6 +11,7 @@ interface Project {
   name: string;
   description: string | null;
   log_format: string;
+  site_url: string | null;
 }
 
 interface Credential {
@@ -189,6 +190,7 @@ export default function ProjectSettingsPage() {
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editSiteUrl, setEditSiteUrl] = useState("");
 
   useEffect(() => {
     Promise.all([
@@ -200,6 +202,7 @@ export default function ProjectSettingsPage() {
       if (projRes.data) {
         setEditName(projRes.data.name);
         setEditDesc(projRes.data.description || "");
+        setEditSiteUrl(projRes.data.site_url || "");
       }
       setLoading(false);
     });
@@ -210,7 +213,7 @@ export default function ProjectSettingsPage() {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName, description: editDesc }),
+      body: JSON.stringify({ name: editName, description: editDesc, site_url: editSiteUrl || null }),
     });
     const { data } = await res.json();
     if (data) {
@@ -276,6 +279,12 @@ export default function ProjectSettingsPage() {
               placeholder="Description"
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
+            <input
+              value={editSiteUrl}
+              onChange={(e) => setEditSiteUrl(e.target.value)}
+              placeholder="Site URL (e.g., https://epicvin.com)"
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
+            />
             <button
               type="submit"
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -288,9 +297,20 @@ export default function ProjectSettingsPage() {
             {project.description && (
               <p className="text-gray-400 text-sm">{project.description}</p>
             )}
-            <span className="inline-block mt-2 text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">
-              Format: {project.log_format}
-            </span>
+            <div className="flex gap-2 mt-2 flex-wrap">
+              <span className="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">
+                Format: {project.log_format}
+              </span>
+              {project.site_url ? (
+                <span className="text-xs bg-gray-800 text-blue-400 px-2 py-1 rounded">
+                  {project.site_url}
+                </span>
+              ) : (
+                <span className="text-xs bg-yellow-900/50 text-yellow-400 px-2 py-1 rounded">
+                  No site URL set — needed for Schema scan
+                </span>
+              )}
+            </div>
           </div>
         )}
       </div>

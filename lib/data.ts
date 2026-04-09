@@ -40,17 +40,29 @@ export function clearSummaryCache() {
   cachedProjectId = null;
 }
 
-// Schema functions — not yet wired to Supabase, return empty data
+// Schema functions — wired to API
 export async function loadSchemaState(): Promise<SchemaState | null> {
-  return null;
+  const projectId = getActiveProjectId();
+  if (!projectId) return null;
+  try {
+    const res = await fetch(`/api/projects/${projectId}/schema`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
 }
 
 export async function loadSchemaHistory(): Promise<SchemaHistoryEntry[]> {
-  return [];
+  const projectId = getActiveProjectId();
+  if (!projectId) return [];
+  try {
+    const res = await fetch(`/api/projects/${projectId}/schema/history`);
+    if (!res.ok) return [];
+    return await res.json();
+  } catch { return []; }
 }
 
 export async function loadSchemaAIAnalysis(): Promise<SchemaAIAnalysis | null> {
-  return null;
+  return null; // AI analysis not yet implemented
 }
 
 export async function loadPagesIndex(): Promise<PagesIndex | null> {

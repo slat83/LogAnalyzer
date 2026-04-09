@@ -686,18 +686,41 @@ export default function SchemaPage() {
   const [history, setHistory] = useState<SchemaHistoryEntry[]>([]);
   const [aiAnalysis, setAiAnalysis] = useState<SchemaAIAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<"status" | "pageType" | "errors">("status");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
-  useEffect(() => {
+  function loadData() {
+    setLoading(true);
     Promise.all([loadSchemaState(), loadSchemaHistory(), loadSchemaAIAnalysis()]).then(([s, h, ai]) => {
       setState(s);
       setHistory(h);
       setAiAnalysis(ai);
       setLoading(false);
     });
-  }, []);
+  }
+
+  useEffect(() => { loadData(); }, []);
+
+  async function handleScan() {
+    const projectId = typeof window !== "undefined" ? localStorage.getItem("loganalyzer_active_project") : null;
+    if (!projectId) { setScanError("No project selected"); return; }
+
+    setScanning(true);
+    setScanError(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/schema/scan`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Scan failed");
+      loadData(); // Refresh
+    } catch (err) {
+      setScanError(err instanceof Error ? err.message : "Scan failed");
+    } finally {
+      setScanning(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -709,8 +732,21 @@ export default function SchemaPage() {
 
   if (!state) {
     return (
-      <div className="flex items-center justify-center h-64 text-gray-500">
-        No schema data available. Run the schema monitor script first.
+      <div className="flex flex-col items-center justify-center h-64 text-center">
+        <div className="text-4xl mb-3">🏷️</div>
+        <p className="text-gray-300 font-medium mb-2">No schema data yet</p>
+        <p className="text-gray-500 text-sm mb-4 max-w-md">
+          Run a schema scan to validate JSON-LD structured data across your site pages.
+          Make sure you have set the Site URL in project settings.
+        </p>
+        {scanError && <p className="text-red-400 text-sm mb-3">{scanError}</p>}
+        <button
+          onClick={handleScan}
+          disabled={scanning}
+          className="px-5 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-medium rounded-lg transition-colors"
+        >
+          {scanning ? "Scanning..." : "Run Schema Scan"}
+        </button>
       </div>
     );
   }
@@ -779,11 +815,23 @@ export default function SchemaPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white">🏷️ Schema Monitor</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          JSON-LD structured data health across your site pages
-        </p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white">🏷️ Schema Monitor</h1>
+          <p className="text-gray-400 text-sm mt-1">
+            JSON-LD structured data health across your site pages
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {scanError && <span className="text-red-400 text-sm">{scanError}</span>}
+          <button
+            onClick={handleScan}
+            disabled={scanning}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+          >
+            {scanning ? "Scanning..." : "Re-scan"}
+          </button>
+        </div>
       </div>
 
       {/* Summary Cards */}
