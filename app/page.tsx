@@ -41,7 +41,7 @@ export default function OverviewPage() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
           <h3 className="text-base md:text-lg font-semibold mb-3">Requests by Day</h3>
           <ResponsiveContainer width="100%" height={250}>
-            <LineChart data={data.requestsByDay}>
+            <LineChart data={displayData.requestsByDay}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="date" stroke="#9ca3af" tick={{ fontSize: 10 }} angle={-45} textAnchor="end" height={50} />
               <YAxis stroke="#9ca3af" tick={{ fontSize: 10 }} tickFormatter={(v) => (v / 1000).toFixed(0) + "k"} width={40} />
