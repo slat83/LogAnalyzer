@@ -2,6 +2,7 @@
 import { useSummary } from "@/lib/use-summary";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -11,10 +12,16 @@ const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899"
 
 export default function OverviewPage() {
   const { data, error, loading } = useSummary();
+  const { from, to } = useDateRange();
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !data) return <NoProject error={error} />;
 
-  const statusData = Object.entries(data.statusCodes)
+  // Apply date range filter to time-series data
+  const filteredByDay = filterByDateRange(data.requestsByDay, "date", from, to);
+  // Override data references for rendering
+  const displayData = { ...data, requestsByDay: filteredByDay };
+
+  const statusData = Object.entries(displayData.statusCodes)
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => ({ name: code, value: count }));
 

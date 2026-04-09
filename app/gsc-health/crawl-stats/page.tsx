@@ -8,6 +8,7 @@ import {
   ComposedChart,
 } from "recharts";
 import { useState } from "react";
+import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
 
 const COLORS = ["#3b82f6", "#ef4444", "#f59e0b", "#10b981", "#8b5cf6", "#ec4899", "#06b6d4", "#f97316"];
 const fmt = (n: number) => n >= 1e9 ? `${(n/1e9).toFixed(1)}B` : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}K` : String(n);
@@ -59,6 +60,8 @@ export default function CrawlStatsDashboard() {
   const { data: cwvData, loading: l5 } = useGscHealthAll("core_web_vitals");
   const [activeTab, setActiveTab] = useState<"crawl" | "perf" | "coverage" | "cwv">("crawl");
   const [cwvDevice, setCwvDevice] = useState<"mobile" | "desktop">("mobile");
+  const { from, to } = useDateRange();
+  const df = <T extends { date: string }>(items: T[]) => filterByDateRange(items, "date", from, to);
 
   if (l1 || l2 || l3 || l4 || l5) return <div className="text-gray-400 p-8 animate-pulse">Loading dashboard...</div>;
   if (e1 || !Object.keys(crawlData).length) return <NoProject error={e1} />;
@@ -194,16 +197,22 @@ export default function CrawlStatsDashboard() {
     return { reason: vals[0], source: vals[1], status: vals[2], pages: num(vals[3]) };
   }).filter((r) => r.pages > 0).sort((a, b) => b.pages - a.pages);
 
-  // ── KPIs ────────────────────────────────────────────────────────────────────
+  // ── Apply date range filter ──────────────────────────────────────────────
+  const fCrawl = df(crawlChart);
+  const f404 = df(daily404);
+  const fPerf = df(perfChart);
+  const fCov = df(covChart);
+  const fCwv = df(cwvChart);
 
-  const totalRequests = crawlChart.reduce((s, r) => s + r.requests, 0);
-  const avgResponse = crawlChart.length > 0 ? Math.round(crawlChart.reduce((s, r) => s + r.responseMs, 0) / crawlChart.length) : 0;
+  // ── KPIs (from filtered data) ──────────────────────────────────────────
+  const totalRequests = fCrawl.reduce((s, r) => s + r.requests, 0);
+  const avgResponse = fCrawl.length > 0 ? Math.round(fCrawl.reduce((s, r) => s + r.responseMs, 0) / fCrawl.length) : 0;
   const total404Urls = (byRespData[Object.keys(byRespData).find((k) => k.includes("Таблица")) || ""] || []).length;
-  const latestIndexed = covChart.length > 0 ? covChart[covChart.length - 1].indexed : 0;
-  const latestNotIndexed = covChart.length > 0 ? covChart[covChart.length - 1].notIndexed : 0;
-  const totalClicks = perfChart.reduce((s, r) => s + r.clicks, 0);
-  const totalImpressions = perfChart.reduce((s, r) => s + r.impressions, 0);
-  const latestCwv = cwvChart.length > 0 ? cwvChart[cwvChart.length - 1] : null;
+  const latestIndexed = fCov.length > 0 ? fCov[fCov.length - 1].indexed : 0;
+  const latestNotIndexed = fCov.length > 0 ? fCov[fCov.length - 1].notIndexed : 0;
+  const totalClicks = fPerf.reduce((s, r) => s + r.clicks, 0);
+  const totalImpressions = fPerf.reduce((s, r) => s + r.impressions, 0);
+  const latestCwv = fCwv.length > 0 ? fCwv[fCwv.length - 1] : null;
 
   const TABS = [
     { key: "crawl", label: "Crawl Stats" },
@@ -251,11 +260,11 @@ export default function CrawlStatsDashboard() {
       {activeTab === "crawl" && (
         <div className="space-y-5">
           {/* Daily crawl chart */}
-          {crawlChart.length > 0 && (
+          {fCrawl.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <h2 className="text-lg font-semibold text-white mb-4">Daily Crawl Requests</h2>
               <ResponsiveContainer width="100%" height={300}>
-                <ComposedChart data={crawlChart}>
+                <ComposedChart data={fCrawl}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                   <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                   <YAxis yAxisId="left" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={(v: number) => fmt(v)} />
@@ -376,11 +385,11 @@ export default function CrawlStatsDashboard() {
           )}
 
           {/* 404 trend */}
-          {daily404.length > 0 && (
+          {f404.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <h2 className="text-sm font-semibold text-white mb-3">Daily 404 Crawl Requests ({total404Urls} unique URLs)</h2>
               <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={daily404}>
+                <AreaChart data={f404}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                   <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                   <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
@@ -394,18 +403,18 @@ export default function CrawlStatsDashboard() {
       )}
 
       {/* ── TAB: Search Performance ──────────────────────────────────────── */}
-      {activeTab === "perf" && perfChart.length > 0 && (
+      {activeTab === "perf" && fPerf.length > 0 && (
         <div className="space-y-5">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Card title="Total Clicks" value={fmt(totalClicks)} />
             <Card title="Total Impressions" value={fmt(totalImpressions)} />
             <Card title="Avg CTR" value={`${(totalClicks / Math.max(totalImpressions, 1) * 100).toFixed(1)}%`} />
-            <Card title="Avg Position" value={perfChart.length > 0 ? (perfChart.reduce((s, r) => s + r.position, 0) / perfChart.length).toFixed(1) : "—"} />
+            <Card title="Avg Position" value={fPerf.length > 0 ? (fPerf.reduce((s, r) => s + r.position, 0) / fPerf.length).toFixed(1) : "—"} />
           </div>
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-lg font-semibold text-white mb-4">Daily Clicks & Impressions</h2>
             <ResponsiveContainer width="100%" height={300}>
-              <ComposedChart data={perfChart}>
+              <ComposedChart data={fPerf}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                 <YAxis yAxisId="left" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={(v: number) => fmt(v)} />
@@ -420,7 +429,7 @@ export default function CrawlStatsDashboard() {
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
             <h2 className="text-sm font-semibold text-white mb-4">CTR & Position Trend</h2>
             <ResponsiveContainer width="100%" height={200}>
-              <ComposedChart data={perfChart}>
+              <ComposedChart data={fPerf}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                 <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                 <YAxis yAxisId="left" tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={(v: number) => `${v}%`} />
@@ -443,11 +452,11 @@ export default function CrawlStatsDashboard() {
             <Card title="Not Indexed" value={fmt(latestNotIndexed)} />
             <Card title="Index Rate" value={latestIndexed + latestNotIndexed > 0 ? `${Math.round(latestIndexed / (latestIndexed + latestNotIndexed) * 100)}%` : "—"} />
           </div>
-          {covChart.length > 0 && (
+          {fCov.length > 0 && (
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
               <h2 className="text-lg font-semibold text-white mb-4">Index Coverage Trend</h2>
               <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={covChart}>
+                <AreaChart data={fCov}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                   <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                   <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} tickFormatter={(v: number) => fmt(v)} />
@@ -490,7 +499,7 @@ export default function CrawlStatsDashboard() {
             </div>
           )}
 
-          {cwvChart.length > 0 ? (
+          {fCwv.length > 0 ? (
             <>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <Card title="Good" value={latestCwv ? String(latestCwv.good) : "—"} sub={latestCwv ? `${Math.round(latestCwv.good / (latestCwv.good + latestCwv.needsImprovement + latestCwv.poor) * 100)}%` : ""} />
@@ -500,7 +509,7 @@ export default function CrawlStatsDashboard() {
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
                 <h2 className="text-lg font-semibold text-white mb-4">Core Web Vitals Trend ({cwvDevice === "mobile" ? "Mobile" : "Desktop"})</h2>
                 <ResponsiveContainer width="100%" height={300}>
-                  <AreaChart data={cwvChart}>
+                  <AreaChart data={fCwv}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
                     <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
                     <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />

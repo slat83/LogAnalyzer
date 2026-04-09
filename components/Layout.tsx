@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
+import DateRangePicker from "@/components/DateRangePicker";
 
 const MANAGE_NAV = [
   { href: "/projects", label: "Projects", icon: "📁" },
@@ -180,6 +181,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </nav>
         )}
 
+        <DateRangePicker />
         <main className="flex-1 p-4 md:p-6 lg:p-8 overflow-auto">{children}</main>
       </div>
     </div>
