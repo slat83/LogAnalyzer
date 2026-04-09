@@ -3,6 +3,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 
+const MANAGE_NAV = [
+  { href: "/projects", label: "Projects", icon: "📁" },
+];
+
 const CORE_NAV = [
   { href: "/", label: "Overview", icon: "📊" },
   { href: "/clusters", label: "URL Clusters", icon: "🔗" },
@@ -59,6 +63,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Desktop sidebar */}
       <aside className="hidden md:flex w-56 bg-gray-900 border-r border-gray-800 p-4 flex-col gap-0 shrink-0">
         <h1 className="text-lg font-bold text-white mb-2 px-2">📊 LogAnalyzer</h1>
+        <NavSection title="Manage" items={MANAGE_NAV} pathname={pathname} />
         <NavSection title="Core" items={CORE_NAV} pathname={pathname} />
         <NavSection title="Advanced" items={ADVANCED_NAV} pathname={pathname} />
       </aside>
@@ -87,6 +92,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Mobile dropdown nav */}
         {menuOpen && (
           <nav className="md:hidden bg-gray-900 border-b border-gray-800 px-4 pb-3 flex flex-col gap-0">
+            <NavSection title="Manage" items={MANAGE_NAV} pathname={pathname} onClick={() => setMenuOpen(false)} />
             <NavSection title="Core" items={CORE_NAV} pathname={pathname} onClick={() => setMenuOpen(false)} />
             <NavSection title="Advanced" items={ADVANCED_NAV} pathname={pathname} onClick={() => setMenuOpen(false)} />
           </nav>
