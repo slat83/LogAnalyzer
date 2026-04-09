@@ -1,98 +1,140 @@
 "use client";
+import { useState } from "react";
 import { useGscHealthAll } from "@/lib/use-gsc-health";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+const num = (v: unknown) => parseInt(String(v || "0").replace(/[\s\u00a0]/g, "")) || 0;
+
+function parseSection(rows: { data: Record<string, unknown> }[]): Record<string, string>[] {
+  return rows.map((r) => {
+    const vals: Record<string, string> = {};
+    Object.entries(r.data).forEach(([k, v]) => { vals[k] = String(v || ""); });
+    return vals;
+  });
+}
+
+function DarkTooltip({ active, payload, label }: { active?: boolean; payload?: { name: string; value: number; color: string }[]; label?: string }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm shadow-xl">
+      <div className="text-gray-400 text-xs mb-1">{label}</div>
+      {payload.map((p, i) => (
+        <div key={i} className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color }} />
+          <span className="text-gray-300">{p.name}:</span>
+          <span className="text-white font-medium">{typeof p.value === "number" ? p.value.toLocaleString() : p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function CwvPage() {
   const { data, loading, error } = useGscHealthAll("core_web_vitals");
+  const [device, setDevice] = useState<"mobile" | "desktop">("mobile");
+
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
   if (error || !Object.keys(data).length) return <NoProject error={error} />;
 
-  // Chart section: daily trend (Poor / Needs Improvement / Good)
-  const chartSection = Object.entries(data).find(([k]) => k.includes("Диаграмма") || k.includes("Chart"));
-  const chartData = (chartSection?.[1] || []).map((r) => {
-    const d = r.data as Record<string, string>;
-    const vals = Object.values(d);
-    return {
-      date: r.report_date,
-      poor: parseInt(String(vals[1] || "0")) || 0,
-      needsImprovement: parseInt(String(vals[2] || "0")) || 0,
-      good: parseInt(String(vals[3] || "0")) || 0,
-    };
-  }).filter((r) => r.good > 0 || r.poor > 0 || r.needsImprovement > 0);
+  const prefix = device + ":";
+  const hasMobile = Object.keys(data).some((k) => k.startsWith("mobile:"));
+  const hasDesktop = Object.keys(data).some((k) => k.startsWith("desktop:"));
 
-  // Issues table
-  const issuesSection = Object.entries(data).find(([k]) => k.includes("Таблица") || k.includes("Table"));
-  const issues = (issuesSection?.[1] || []).map((r) => {
-    const d = r.data as Record<string, string>;
-    const vals = Object.values(d);
-    return { level: vals[0] || "", issue: vals[1] || "", validation: vals[2] || "", urls: parseInt(String(vals[3] || "0")) || 0 };
-  });
+  // Chart data
+  const chartKey = Object.keys(data).find((k) => k.startsWith(prefix) && (k.includes("Диаграмма") || k.includes("Chart")))
+    || Object.keys(data).find((k) => k.includes("Диаграмма"));
+  const chartData = parseSection(data[chartKey || ""] || []).map((r) => {
+    const vals = Object.values(r);
+    return { date: vals[0], poor: num(vals[1]), needsImprovement: num(vals[2]), good: num(vals[3]) };
+  }).filter((r) => r.good > 0 || r.poor > 0);
 
-  // Metadata (device type)
-  const metaSection = Object.entries(data).find(([k]) => k.includes("Метаданные") || k.includes("Metadata"));
-  const device = metaSection?.[1]?.[0]?.data ? Object.values(metaSection[1][0].data as Record<string, string>)[1] || "" : "";
+  // Issues
+  const issuesKey = Object.keys(data).find((k) => k.startsWith(prefix) && (k.includes("Таблица") || k.includes("Table")))
+    || Object.keys(data).find((k) => k.includes("Таблица"));
+  const issues = parseSection(data[issuesKey || ""] || []).map((r) => {
+    const vals = Object.values(r);
+    return { level: vals[0] || "", issue: String(vals[1] || "").replace(/&quot;/g, '"'), status: vals[2] || "", urls: num(vals[3]) };
+  }).filter((iss) => iss.issue);
 
   const latest = chartData[chartData.length - 1];
-  const totalGood = latest?.good || 0;
-  const totalNI = latest?.needsImprovement || 0;
-  const totalPoor = latest?.poor || 0;
-  const total = totalGood + totalNI + totalPoor;
+  const total = latest ? latest.good + latest.needsImprovement + latest.poor : 0;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">⚙️ Core Web Vitals</h1>
-        {device && <span className="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">{device}</span>}
+        {(hasMobile || hasDesktop) && (
+          <div className="flex gap-1 bg-gray-800 rounded-lg p-1">
+            <button onClick={() => setDevice("mobile")}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${device === "mobile" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>
+              📱 Mobile
+            </button>
+            <button onClick={() => setDevice("desktop")}
+              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${device === "desktop" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"}`}>
+              🖥️ Desktop
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Card title="Good" value={totalGood.toLocaleString()} sub={total > 0 ? `${Math.round(totalGood/total*100)}%` : ""} />
-        <Card title="Needs Improvement" value={totalNI.toLocaleString()} sub={total > 0 ? `${Math.round(totalNI/total*100)}%` : ""} />
-        <Card title="Poor" value={totalPoor.toLocaleString()} sub={total > 0 ? `${Math.round(totalPoor/total*100)}%` : ""} />
-        <Card title="Total URLs" value={total.toLocaleString()} />
-      </div>
+      {chartData.length > 0 ? (
+        <>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <Card title="Good" value={latest ? String(latest.good) : "—"} sub={total > 0 ? `${Math.round((latest?.good || 0) / total * 100)}%` : ""} />
+            <Card title="Needs Improvement" value={latest ? String(latest.needsImprovement) : "—"} sub={total > 0 ? `${Math.round((latest?.needsImprovement || 0) / total * 100)}%` : ""} />
+            <Card title="Poor" value={latest ? String(latest.poor) : "—"} sub={total > 0 ? `${Math.round((latest?.poor || 0) / total * 100)}%` : ""} />
+            <Card title="Total URLs" value={total.toLocaleString()} />
+          </div>
 
-      {chartData.length > 1 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-          <h2 className="text-lg font-semibold text-white mb-4">CWV Trend</h2>
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="date" tick={{ fill: "#9CA3AF", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#9CA3AF", fontSize: 11 }} />
-              <Tooltip contentStyle={{ backgroundColor: "#1f2937", border: "none", borderRadius: 8 }} />
-              <Legend />
-              <Line type="monotone" dataKey="good" stroke="#10b981" strokeWidth={2} dot={false} name="Good" />
-              <Line type="monotone" dataKey="needsImprovement" stroke="#f59e0b" strokeWidth={2} dot={false} name="Needs Improvement" />
-              <Line type="monotone" dataKey="poor" stroke="#ef4444" strokeWidth={2} dot={false} name="Poor" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <h2 className="text-lg font-semibold text-white mb-4">
+              CWV Trend ({device === "mobile" ? "Mobile" : "Desktop"})
+            </h2>
+            <ResponsiveContainer width="100%" height={350}>
+              <AreaChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis dataKey="date" tick={{ fill: "#6b7280", fontSize: 10 }} tickFormatter={(v) => v.substring(5)} />
+                <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} />
+                <Tooltip content={<DarkTooltip />} />
+                <Legend />
+                <Area type="monotone" dataKey="good" fill="#10b98130" stroke="#10b981" strokeWidth={2} name="Good" stackId="1" />
+                <Area type="monotone" dataKey="needsImprovement" fill="#f59e0b30" stroke="#f59e0b" strokeWidth={2} name="Needs Improvement" stackId="1" />
+                <Area type="monotone" dataKey="poor" fill="#ef444430" stroke="#ef4444" strokeWidth={2} name="Poor" stackId="1" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
 
-      {issues.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-auto">
-          <h2 className="text-lg font-semibold text-white p-5 pb-3">Issues</h2>
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-gray-800 text-gray-400">
-              <th className="px-4 py-2 text-left">Level</th>
-              <th className="px-4 py-2 text-left">Issue</th>
-              <th className="px-4 py-2 text-right">URLs</th>
-              <th className="px-4 py-2 text-left">Status</th>
-            </tr></thead>
-            <tbody>
-              {issues.map((iss, i) => (
-                <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                  <td className="px-4 py-2"><span className={`text-xs px-2 py-0.5 rounded ${iss.level.includes("Низкая") || iss.level.includes("Poor") ? "bg-red-900/50 text-red-300" : "bg-yellow-900/50 text-yellow-300"}`}>{iss.level.includes("Низкая") || iss.level.includes("Poor") ? "Poor" : "NI"}</span></td>
-                  <td className="px-4 py-2 text-gray-300 text-xs max-w-md">{iss.issue.replace(/&quot;/g, '"')}</td>
-                  <td className="px-4 py-2 text-right text-gray-100 font-medium">{iss.urls.toLocaleString()}</td>
-                  <td className="px-4 py-2 text-gray-500 text-xs">{iss.validation}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {issues.length > 0 && (
+            <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+              <h3 className="text-lg font-semibold text-white mb-4">
+                Issues ({device === "mobile" ? "Mobile" : "Desktop"})
+              </h3>
+              <div className="space-y-3">
+                {issues.map((iss, i) => (
+                  <div key={i} className="flex items-center gap-3 py-2 border-b border-gray-800/30 last:border-0">
+                    <span className={`text-xs px-2 py-1 rounded shrink-0 ${
+                      iss.level.includes("Низкая") || iss.level.includes("Poor")
+                        ? "bg-red-900/50 text-red-300"
+                        : "bg-yellow-900/50 text-yellow-300"
+                    }`}>
+                      {iss.level.includes("Низкая") || iss.level.includes("Poor") ? "Poor" : "Needs Improvement"}
+                    </span>
+                    <span className="text-gray-300 text-sm flex-1">{iss.issue}</span>
+                    <span className="text-gray-100 font-semibold text-sm shrink-0">{iss.urls.toLocaleString()} URLs</span>
+                    <span className="text-gray-500 text-xs shrink-0">{iss.status}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="text-gray-500 text-center py-12">
+          <div className="text-3xl mb-2">📊</div>
+          No {device === "mobile" ? "mobile" : "desktop"} CWV data found.
+          Upload the corresponding Core Web Vitals export from GSC.
         </div>
       )}
     </div>
