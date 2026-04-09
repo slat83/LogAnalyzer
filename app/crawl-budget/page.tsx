@@ -1,7 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { loadSummary } from "@/lib/data";
-import { Summary } from "@/lib/types";
+import { useSummary } from "@/lib/use-summary";
+import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
@@ -10,9 +9,9 @@ import {
 const COLORS = ["#10b981", "#ef4444", "#f59e0b", "#8b5cf6", "#3b82f6"];
 
 export default function CrawlBudgetPage() {
-  const [data, setData] = useState<Summary | null>(null);
-  useEffect(() => { loadSummary().then(setData); }, []);
-  if (!data) return <div className="text-gray-400 p-8">Loading...</div>;
+  const { data, error, loading } = useSummary();
+  if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (error || !data) return <NoProject error={error} />;
 
   const cb = data.crawlBudget;
 

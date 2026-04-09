@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
-import { loadSummary } from "@/lib/data";
-import { Summary, Cluster } from "@/lib/types";
+import { useState } from "react";
+import { useSummary } from "@/lib/use-summary";
+import NoProject from "@/components/NoProject";
+import { Cluster } from "@/lib/types";
 import DataTable from "@/components/DataTable";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -9,10 +10,10 @@ import {
 } from "recharts";
 
 export default function ClustersPage() {
-  const [data, setData] = useState<Summary | null>(null);
+  const { data, error, loading } = useSummary();
   const [selected, setSelected] = useState<Cluster | null>(null);
-  useEffect(() => { loadSummary().then(setData); }, []);
-  if (!data) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (error || !data) return <NoProject error={error} />;
 
   const columns = [
     {

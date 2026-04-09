@@ -1,7 +1,6 @@
 "use client";
-import { useEffect, useState } from "react";
-import { loadSummary } from "@/lib/data";
-import { Summary } from "@/lib/types";
+import { useSummary } from "@/lib/use-summary";
+import NoProject from "@/components/NoProject";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
@@ -13,9 +12,9 @@ const LANG_LABELS: Record<string, string> = {
 };
 
 export default function LanguagesPage() {
-  const [data, setData] = useState<Summary | null>(null);
-  useEffect(() => { loadSummary().then(setData); }, []);
-  if (!data) return <div className="text-gray-400 p-8">Loading...</div>;
+  const { data, error, loading } = useSummary();
+  if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
+  if (error || !data) return <NoProject error={error} />;
 
   const langs = data.languages;
   const chartData = langs.slice(0, 15).map(l => ({

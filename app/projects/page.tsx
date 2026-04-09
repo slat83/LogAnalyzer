@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useProject } from "@/lib/project-context";
+import { clearSummaryCache } from "@/lib/data";
 
 interface Project {
   id: string;
@@ -20,6 +22,7 @@ export default function ProjectsPage() {
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
   const router = useRouter();
+  const { projectId: activeProjectId, setProjectId } = useProject();
 
   useEffect(() => {
     fetch("/api/projects")
@@ -117,30 +120,55 @@ export default function ProjectsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {projects.map((p) => (
-            <Link
+          {projects.map((p) => {
+            const isActive = activeProjectId === p.id;
+            return (
+            <div
               key={p.id}
-              href={`/projects/${p.id}/settings`}
-              className="block bg-gray-900 border border-gray-800 rounded-xl p-5 hover:border-gray-700 transition-colors"
+              className={`bg-gray-900 border rounded-xl p-5 transition-colors ${
+                isActive ? "border-blue-600" : "border-gray-800"
+              }`}
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold text-white">{p.name}</h2>
+                  <h2 className="text-lg font-semibold text-white">
+                    {isActive && <span className="text-blue-400 mr-1">●</span>}
+                    {p.name}
+                  </h2>
                   {p.description && (
                     <p className="text-gray-400 text-sm mt-1">{p.description}</p>
                   )}
                 </div>
-                <div className="text-gray-500 text-xs">
-                  {new Date(p.created_at).toLocaleDateString()}
+                <div className="flex items-center gap-3">
+                  {!isActive && (
+                    <button
+                      onClick={() => { setProjectId(p.id); clearSummaryCache(); }}
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-lg transition-colors"
+                    >
+                      Activate
+                    </button>
+                  )}
+                  <Link
+                    href={`/projects/${p.id}/settings`}
+                    className="text-gray-400 hover:text-gray-300 text-sm"
+                  >
+                    Settings
+                  </Link>
                 </div>
               </div>
               <div className="flex gap-3 mt-3">
                 <span className="text-xs bg-gray-800 text-gray-400 px-2 py-1 rounded">
                   {p.log_format}
                 </span>
+                {isActive && (
+                  <span className="text-xs bg-blue-900/50 text-blue-300 px-2 py-1 rounded">
+                    Active
+                  </span>
+                )}
               </div>
-            </Link>
-          ))}
+            </div>
+          );
+          })}
         </div>
       )}
     </div>

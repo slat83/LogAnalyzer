@@ -1,96 +1,62 @@
 "use client";
-import { Summary, SchemaState, SchemaHistoryEntry, SchemaAIAnalysis, PagesData, PagesIndex, ClusterData } from "./types";
+import { Summary, SchemaState, SchemaHistoryEntry, SchemaAIAnalysis, PagesIndex, ClusterData } from "./types";
 
+// Cache keyed by project ID
+let cachedProjectId: string | null = null;
 let cached: Summary | null = null;
 
+/**
+ * Get the active project ID from localStorage.
+ * Dashboard pages call loadSummary() which uses this to determine which project to query.
+ */
+function getActiveProjectId(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("loganalyzer_active_project");
+}
+
 export async function loadSummary(): Promise<Summary> {
-  if (cached) return cached;
-  const res = await fetch("/data/summary.json");
+  const projectId = getActiveProjectId();
+  if (!projectId) {
+    throw new Error("NO_PROJECT");
+  }
+
+  // Return cached if same project
+  if (cached && cachedProjectId === projectId) return cached;
+
+  const res = await fetch(`/api/projects/${projectId}/summary`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Failed to load" }));
+    throw new Error(err.error || "Failed to load summary");
+  }
+
   cached = await res.json();
+  cachedProjectId = projectId;
   return cached!;
 }
 
-let cachedSchemaState: SchemaState | null = null;
-
-export async function loadSchemaState(): Promise<SchemaState | null> {
-  if (cachedSchemaState) return cachedSchemaState;
-  try {
-    const res = await fetch("/data/schema-state.json");
-    if (!res.ok) return null;
-    cachedSchemaState = await res.json();
-    return cachedSchemaState;
-  } catch {
-    return null;
-  }
+/** Clear the cache (e.g., after uploading new analysis data). */
+export function clearSummaryCache() {
+  cached = null;
+  cachedProjectId = null;
 }
 
-let cachedSchemaHistory: SchemaHistoryEntry[] | null = null;
+// Schema functions — not yet wired to Supabase, return empty data
+export async function loadSchemaState(): Promise<SchemaState | null> {
+  return null;
+}
 
 export async function loadSchemaHistory(): Promise<SchemaHistoryEntry[]> {
-  if (cachedSchemaHistory) return cachedSchemaHistory;
-  try {
-    const res = await fetch("/data/schema-history.json");
-    if (!res.ok) return [];
-    cachedSchemaHistory = await res.json();
-    return cachedSchemaHistory!;
-  } catch {
-    return [];
-  }
+  return [];
 }
-
-let cachedSchemaAIAnalysis: SchemaAIAnalysis | null = null;
 
 export async function loadSchemaAIAnalysis(): Promise<SchemaAIAnalysis | null> {
-  if (cachedSchemaAIAnalysis) return cachedSchemaAIAnalysis;
-  try {
-    const res = await fetch("/data/schema-ai-analysis.json");
-    if (!res.ok) return null;
-    cachedSchemaAIAnalysis = await res.json();
-    return cachedSchemaAIAnalysis;
-  } catch {
-    return null;
-  }
+  return null;
 }
-
-let cachedPagesData: PagesData | null = null;
-
-export async function loadPagesData(): Promise<PagesData | null> {
-  if (cachedPagesData) return cachedPagesData;
-  try {
-    const res = await fetch("/data/pages-data.json");
-    if (!res.ok) return null;
-    cachedPagesData = await res.json();
-    return cachedPagesData;
-  } catch {
-    return null;
-  }
-}
-
-let cachedPagesIndex: PagesIndex | null = null;
 
 export async function loadPagesIndex(): Promise<PagesIndex | null> {
-  if (cachedPagesIndex) return cachedPagesIndex;
-  try {
-    const res = await fetch("/data/pages/index.json");
-    if (!res.ok) return null;
-    cachedPagesIndex = await res.json();
-    return cachedPagesIndex;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
-const cachedClusterPages: Map<string, ClusterData> = new Map();
-
-export async function loadClusterPages(file: string): Promise<ClusterData | null> {
-  if (cachedClusterPages.has(file)) return cachedClusterPages.get(file)!;
-  try {
-    const res = await fetch(`/data/pages/${file}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    cachedClusterPages.set(file, data);
-    return data;
-  } catch {
-    return null;
-  }
+export async function loadClusterPages(_file: string): Promise<ClusterData | null> {
+  return null;
 }

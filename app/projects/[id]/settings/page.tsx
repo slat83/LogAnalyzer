@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import LogUploader from "@/components/LogUploader";
+import { useProject } from "@/lib/project-context";
+import { clearSummaryCache } from "@/lib/data";
 
 interface Project {
   id: string;
@@ -178,6 +180,7 @@ export default function ProjectSettingsPage() {
   const params = useParams();
   const router = useRouter();
   const projectId = params.id as string;
+  const { setProjectId } = useProject();
 
   const [project, setProject] = useState<Project | null>(null);
   const [credentials, setCredentials] = useState<Credential[]>([]);
@@ -293,7 +296,7 @@ export default function ProjectSettingsPage() {
       </div>
 
       {/* Log Upload */}
-      <LogUploader projectId={projectId} onComplete={() => {}} />
+      <LogUploader projectId={projectId} onComplete={() => { setProjectId(projectId); clearSummaryCache(); }} />
 
       {/* Credentials */}
       <div>
