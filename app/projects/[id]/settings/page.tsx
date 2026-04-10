@@ -13,6 +13,7 @@ interface Project {
   description: string | null;
   log_format: string;
   site_url: string | null;
+  brand_keywords: string[];
 }
 
 interface Credential {
@@ -192,6 +193,9 @@ export default function ProjectSettingsPage() {
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
   const [editSiteUrl, setEditSiteUrl] = useState("");
+  const [editKeywords, setEditKeywords] = useState("");
+  const [fetchingMentions, setFetchingMentions] = useState(false);
+  const [fetchResult, setFetchResult] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -204,6 +208,7 @@ export default function ProjectSettingsPage() {
         setEditName(projRes.data.name);
         setEditDesc(projRes.data.description || "");
         setEditSiteUrl(projRes.data.site_url || "");
+        setEditKeywords((projRes.data.brand_keywords || []).join(", "));
       }
       setLoading(false);
     });
@@ -214,7 +219,12 @@ export default function ProjectSettingsPage() {
     const res = await fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: editName, description: editDesc, site_url: editSiteUrl || null }),
+      body: JSON.stringify({
+        name: editName,
+        description: editDesc,
+        site_url: editSiteUrl || null,
+        brand_keywords: editKeywords.split(",").map((k: string) => k.trim()).filter(Boolean),
+      }),
     });
     const { data } = await res.json();
     if (data) {
@@ -286,6 +296,15 @@ export default function ProjectSettingsPage() {
               placeholder="Site URL (e.g., https://epicvin.com)"
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
+            <div>
+              <label className="block text-sm font-medium text-gray-400 mb-1">Brand Keywords (comma-separated)</label>
+              <input
+                value={editKeywords}
+                onChange={(e) => setEditKeywords(e.target.value)}
+                placeholder="EpicVin, epicvin, epicvin.com"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
+            </div>
             <button
               type="submit"
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -311,9 +330,41 @@ export default function ProjectSettingsPage() {
                   No site URL set — needed for Schema scan
                 </span>
               )}
+              {project.brand_keywords?.length > 0 && (
+                <span className="text-xs bg-gray-800 text-green-400 px-2 py-1 rounded">
+                  Keywords: {project.brand_keywords.join(", ")}
+                </span>
+              )}
             </div>
           </div>
         )}
+      </div>
+
+      {/* Fetch Competitor Mentions */}
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Competitor Mentions</h3>
+            <p className="text-gray-400 text-sm mt-1">Fetch latest mentions from Firehose and check for brand keyword matches.</p>
+          </div>
+          <button
+            onClick={async () => {
+              setFetchingMentions(true); setFetchResult(null);
+              try {
+                const res = await fetch(`/api/projects/${projectId}/competitors/fetch`, { method: "POST" });
+                const d = await res.json();
+                if (!res.ok) throw new Error(d.error);
+                setFetchResult(`Fetched ${d.data?.total || 0} events, ${d.data?.inserted || 0} new, ${d.data?.brandMentions || 0} brand mentions`);
+              } catch (e) { setFetchResult(`Error: ${e instanceof Error ? e.message : "Failed"}`); }
+              setFetchingMentions(false);
+            }}
+            disabled={fetchingMentions}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+          >
+            {fetchingMentions ? "Fetching..." : "Fetch Now"}
+          </button>
+        </div>
+        {fetchResult && <p className={`text-sm mt-3 ${fetchResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{fetchResult}</p>}
       </div>
 
       {/* Log Upload */}

@@ -13,7 +13,7 @@ export async function GET(
 
   const { data, error } = await supabase
     .from("competitor_mentions")
-    .select("matched_at, rule, url, title, domain, language, page_category, page_types, publish_time")
+    .select("matched_at, rule, url, title, domain, language, page_category, page_types, publish_time, has_brand_mention, matched_keywords, mention_snippet")
     .eq("project_id", id)
     .order("matched_at", { ascending: false })
     .range(0, 499);

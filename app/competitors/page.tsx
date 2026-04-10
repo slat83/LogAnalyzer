@@ -18,6 +18,9 @@ interface Mention {
   page_category: string | null;
   page_types: string | null;
   publish_time: string | null;
+  has_brand_mention: boolean;
+  matched_keywords: string[];
+  mention_snippet: string | null;
 }
 
 function shortRule(rule: string): string {
@@ -88,6 +91,7 @@ export default function CompetitorsPage() {
         <Card title="Total Mentions" value={String(filtered.length)} />
         <Card title="Unique Domains" value={String(new Set(filtered.map((m) => m.domain)).size)} />
         <Card title="Active Rules" value={String(uniqueRules.length)} />
+        <Card title="Brand Mentions" value={String(filtered.filter((m) => m.has_brand_mention).length)} sub={`of ${filtered.length} total`} />
         <Card title="Date Range" value={filtered.length > 0 ? `${filtered[filtered.length-1].date} → ${filtered[0].date}` : "—"} />
       </div>
 
@@ -173,13 +177,23 @@ export default function CompetitorsPage() {
           </tr></thead>
           <tbody>
             {displayed.slice(0, 200).map((m, i) => (
-              <tr key={i} className="border-b border-gray-800/30 hover:bg-gray-800/20">
+              <tr key={i} className={`border-b border-gray-800/30 hover:bg-gray-800/20 ${m.has_brand_mention ? "bg-green-900/10" : ""}`}>
                 <td className="px-3 py-2 text-gray-500 text-xs">{m.date}</td>
                 <td className="px-3 py-2">
-                  <a href={m.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-xs block truncate max-w-md">
-                    {m.title || m.url}
-                  </a>
+                  <div className="flex items-center gap-2">
+                    <a href={m.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 text-xs block truncate max-w-md">
+                      {m.title || m.url}
+                    </a>
+                    {m.has_brand_mention && (
+                      <span className="text-[9px] bg-green-900/60 text-green-300 px-1.5 py-0.5 rounded shrink-0">
+                        {m.matched_keywords?.join(", ") || "Brand"}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-gray-600 text-[10px] truncate">{m.url}</div>
+                  {m.mention_snippet && (
+                    <div className="text-gray-500 text-[10px] mt-1 italic max-w-md truncate">&ldquo;{m.mention_snippet}&rdquo;</div>
+                  )}
                 </td>
                 <td className="px-3 py-2 text-gray-400 text-xs">{m.domain}</td>
                 <td className="px-3 py-2">
