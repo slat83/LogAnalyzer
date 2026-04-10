@@ -40,13 +40,34 @@ export default function CompetitorsPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [ruleFilter, setRuleFilter] = useState<string>("all");
+  const [fetching, setFetching] = useState(false);
+  const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (pLoading || !projectId) { setLoading(false); return; }
+  function loadData() {
+    if (!projectId) return;
     fetch(`/api/projects/${projectId}/competitors`)
       .then((r) => r.json())
       .then((d) => { setData(d.data || []); setLoading(false); })
       .catch((e) => { setError(e.message); setLoading(false); });
+  }
+
+  async function handleFetch() {
+    if (!projectId) return;
+    setFetching(true); setFetchMsg(null);
+    try {
+      const res = await fetch(`/api/projects/${projectId}/competitors/fetch`, { method: "POST" });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error);
+      setFetchMsg(`+${d.data?.inserted || 0} new, ${d.data?.brandMentions || 0} brand mentions`);
+      // Reload data
+      loadData();
+    } catch (e) { setFetchMsg(`Error: ${e instanceof Error ? e.message : "Failed"}`); }
+    setFetching(false);
+  }
+
+  useEffect(() => {
+    if (pLoading || !projectId) { setLoading(false); return; }
+    loadData();
   }, [projectId, pLoading]);
 
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;
@@ -85,7 +106,19 @@ export default function CompetitorsPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="text-2xl font-bold text-white">🔍 Competitor Monitoring</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">🔍 Competitor Monitoring</h1>
+        <div className="flex items-center gap-3">
+          {fetchMsg && <span className={`text-xs ${fetchMsg.startsWith("Error") ? "text-red-400" : "text-green-400"}`}>{fetchMsg}</span>}
+          <button
+            onClick={handleFetch}
+            disabled={fetching}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors shrink-0"
+          >
+            {fetching ? "Fetching..." : "Fetch New Mentions"}
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card title="Total Mentions" value={String(filtered.length)} />
