@@ -152,6 +152,11 @@ export default function Layout({ children }: { children: React.ReactNode }) {
     </>
   );
 
+  // Hide chrome on login page
+  if (pathname === "/login" || pathname === "/login/") {
+    return <>{children}</>;
+  }
+
   return (
     <div className="flex min-h-screen bg-gray-950 text-gray-100">
       {/* Desktop sidebar */}
