@@ -35,6 +35,10 @@ const ADVANCED_NAV = [
   { href: "/schema", label: "Schema", icon: "🏷️" },
 ];
 
+const COMPETITORS_NAV = [
+  { href: "/competitors", label: "Competitor Monitor", icon: "🔍" },
+];
+
 type NavItem = { href: string; label: string; icon: string };
 
 function CollapsibleNavSection({
@@ -142,6 +146,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <NavSection title="Manage" items={MANAGE_NAV} pathname={pathname} onClick={mobileClick} />
       <CollapsibleNavSection title="Core" items={CORE_NAV} pathname={pathname} storageKey="core" defaultOpen={true} onClick={mobileClick} />
       <CollapsibleNavSection title="GSC Health" items={GSC_HEALTH_NAV} pathname={pathname} storageKey="gsc" defaultOpen={false} onClick={mobileClick} />
+      <NavSection title="Monitoring" items={COMPETITORS_NAV} pathname={pathname} onClick={mobileClick} />
       <CollapsibleNavSection title="Advanced" items={ADVANCED_NAV} pathname={pathname} storageKey="advanced" defaultOpen={false} onClick={mobileClick} />
     </>
   );
