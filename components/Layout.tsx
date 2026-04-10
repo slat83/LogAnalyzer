@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import DateRangePicker from "@/components/DateRangePicker";
+import { createClient } from "@/lib/supabase/client";
 
 const MANAGE_NAV = [
   { href: "/projects", label: "Projects", icon: "📁" },
@@ -154,9 +155,15 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-gray-950 text-gray-100">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-56 bg-gray-900 border-r border-gray-800 p-4 flex-col gap-0 shrink-0 overflow-y-auto">
+      <aside className="hidden md:flex w-56 bg-gray-900 border-r border-gray-800 p-4 flex-col shrink-0 overflow-y-auto">
         <h1 className="text-lg font-bold text-white mb-2 px-2">📊 LogAnalyzer</h1>
-        {sidebarContent()}
+        <div className="flex-1">{sidebarContent()}</div>
+        <button
+          onClick={async () => { await createClient().auth.signOut(); window.location.href = "/login"; }}
+          className="mt-4 px-3 py-2 text-xs text-gray-500 hover:text-gray-300 hover:bg-gray-800 rounded-lg transition-colors w-full text-left"
+        >
+          ↩ Sign out
+        </button>
       </aside>
 
       {/* Mobile header + hamburger */}
