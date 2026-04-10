@@ -207,12 +207,46 @@ Each datum lives in exactly ONE place:
 - `schema_results` — url, page_type, found_schema_types, status, delta, errors
 - `schema_history` — total, ok, warning, critical, coverage_rate, changes
 
+### GSC Health Monitoring
+- `gsc_health_data` — project_id, report_type, report_date, section, data (JSONB)
+- Stores data from GSC ZIP exports (Russian headers supported)
+- Report types: crawl_stats, crawl_by_response, performance, coverage, core_web_vitals
+- Each ZIP has multiple CSV sections (Диаграмма, Таблица, Метаданные, etc.)
+
+### Competitor Monitoring (Firehose)
+- `competitor_mentions` — matched_at, rule, url, title, domain, has_brand_mention, matched_keywords[], mention_snippet
+- Data from Firehose real-time web monitoring API (SSE stream)
+- `projects.brand_keywords` TEXT[] — configurable keywords per project (e.g., EpicVin, epicvin.com)
+- Dedup index on (project_id, url, matched_at)
+
 ## Edge Functions (Supabase Deno Runtime)
 
 | Function | Purpose | Limits |
 |----------|---------|--------|
 | `pages-enrichment` (v4) | GSC + GA4 fetch, URL classification, aggregation | 10K GA4 pages, 25K GSC pages |
 | `schema-validator` (v1) | HTML crawling, JSON-LD extraction, schema.org validation | 50 URLs, 5 concurrent |
+| `firehose-poller` (v2) | Fetch Firehose SSE stream, keyword detection in article content | 500 events, 30s timeout |
+| `mention-backfill` (v1) | Crawl existing mention URLs to detect brand keywords retroactively | 200 URLs, 5 concurrent |
+
+## Automated Jobs
+
+| Job | Schedule | Endpoint |
+|-----|----------|----------|
+| Firehose daily poll | 8am UTC daily (Vercel Cron) | `GET /api/cron/firehose` |
+
+## Global Features
+
+### Date Range Selector
+- Top bar with date inputs + preset buttons (7d, 28d, 90d, All)
+- `DateRangeContext` persisted in localStorage
+- Client-side filtering via `filterByDateRange()` — no API changes
+- Applied to ALL time-series charts and KPI cards across all pages
+- Min date: March 11, 2026 (tracking start)
+
+### Collapsible Sidebar
+- Sections: Manage, Core, GSC Health, Monitoring, Advanced
+- Collapse state persisted in localStorage
+- Auto-expands when active page is in section
 
 ## Log Format
 
