@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Summary, Cluster, BotData, DayCount } from "@/lib/types";
+import type { Summary, Cluster, BotData, DayCount, ClusterDayDetail } from "@/lib/types";
 import { fetchAllPaged } from "@/lib/paginate";
 
 type ClusterDailyRow = { cluster_id: string; day: string; request_count: number };
@@ -49,7 +49,6 @@ async function fetchBotDaily(
       .range(from, to),
   );
 }
-
 /**
  * GET /api/projects/[id]/summary
  * Reconstructs a full Summary object from the normalized DB tables.
@@ -144,6 +143,9 @@ export async function GET(
   const overview = run.overview as Record<string, unknown>;
   const timeSeries = run.time_series as Record<string, unknown>;
 
+  // Per-cluster per-day detail from time_series JSONB (may be missing on older analyses)
+  const clusterDetailMap = ((run.time_series as Record<string, unknown>)?.clusterDetail || {}) as Record<string, ClusterDayDetail[]>;
+
   // Clusters
   const clusters: Cluster[] = (clustersRes.data || []).map((c) => ({
     pattern: c.pattern,
@@ -152,6 +154,7 @@ export async function GET(
     responseTime: { avg: c.rt_avg, p95: c.rt_p95 },
     byDay: clusterDailyMap.get(c.id) || [],
     topUAs: clusterUAMap.get(c.id) || [],
+    detailByDay: clusterDetailMap[c.pattern],
   }));
 
   // Errors
@@ -202,6 +205,8 @@ export async function GET(
     crawlBudget: overview.crawlBudget as Summary["crawlBudget"],
     requestsByDay: (timeSeries.requestsByDay as DayCount[]) || [],
     checkoutFunnel: (timeSeries.checkoutFunnel as Summary["checkoutFunnel"]) || { totalRequests: 0, uniqueVINs: 0, byStatus: {}, byDay: [] },
+    statusCodesByDay: (timeSeries.statusCodesByDay as Summary["statusCodesByDay"]) || undefined,
+    responseTimeByDay: (timeSeries.responseTimeByDay as Summary["responseTimeByDay"]) || undefined,
     heatmap: (run.heatmap as Summary["heatmap"]) || { responseTime: [], requests: [], hours: [], days: [] },
     suspicious: (run.suspicious as Summary["suspicious"]) || { topUAs: [], highErrorUAs: [] },
     clusters,

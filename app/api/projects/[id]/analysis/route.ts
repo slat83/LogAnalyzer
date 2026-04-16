@@ -63,6 +63,16 @@ export async function POST(
         time_series: {
           requestsByDay: summary.requestsByDay,
           checkoutFunnel: summary.checkoutFunnel,
+          statusCodesByDay: summary.statusCodesByDay || null,
+          responseTimeByDay: summary.responseTimeByDay || null,
+          // Per-cluster per-day detail (statuses + RT samples), keyed by cluster pattern.
+          // `count` is already persisted in cluster_daily; kept here too for simpler reconstruction.
+          clusterDetail: (summary.clusters || [])
+            .filter((c) => c.detailByDay?.length)
+            .reduce<Record<string, Cluster["detailByDay"]>>((acc, c) => {
+              acc[c.pattern] = c.detailByDay;
+              return acc;
+            }, {}),
         },
         heatmap: summary.heatmap || null,
         redirects_summary: summary.redirects

@@ -3,6 +3,7 @@ import { useSummary } from "@/lib/use-summary";
 import NoProject from "@/components/NoProject";
 import Card from "@/components/Card";
 import { useDateRange, filterByDateRange } from "@/lib/date-range-context";
+import { statsFromSamples } from "@/lib/parser/stats";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -20,15 +21,58 @@ export default function OverviewPage() {
   const isFiltered = !!(from || to);
   const filteredByDay = filterByDateRange(data.requestsByDay, "date", from, to);
 
-  // Recalculate KPIs from filtered time-series
+  // Recalculate totals from filtered time-series
   const filteredTotal = filteredByDay.reduce((s, d) => s + d.count, 0);
   const filteredDateRange = filteredByDay.length > 0
     ? `${filteredByDay[0].date} → ${filteredByDay[filteredByDay.length - 1].date}`
     : `${data.dateRange.from} → ${data.dateRange.to}`;
 
-  const statusData = Object.entries(data.statusCodes)
+  // Recalculate bot/human totals from per-bot byDay series
+  const filteredBotTotal = isFiltered
+    ? Object.values(data.bots).reduce(
+        (s, b) => s + filterByDateRange(b.byDay, "date", from, to).reduce((ss, d) => ss + d.count, 0),
+        0
+      )
+    : data.botVsHuman.bot.requests;
+  const filteredHumanTotal = isFiltered
+    ? Math.max(0, filteredTotal - filteredBotTotal)
+    : data.botVsHuman.human.requests;
+
+  // Status codes — aggregate per-day breakdown if available
+  const hasStatusByDay = Array.isArray(data.statusCodesByDay) && data.statusCodesByDay.length > 0;
+  let statusCounts: Record<string, number> = data.statusCodes;
+  if (isFiltered && hasStatusByDay) {
+    const filteredDays = filterByDateRange(data.statusCodesByDay!, "date", from, to);
+    const agg: Record<string, number> = {};
+    for (const d of filteredDays) {
+      for (const [code, cnt] of Object.entries(d.statuses)) {
+        agg[code] = (agg[code] || 0) + cnt;
+      }
+    }
+    statusCounts = agg;
+  }
+  const statusData = Object.entries(statusCounts)
     .sort((a, b) => b[1] - a[1])
     .map(([code, count]) => ({ name: code, value: count }));
+
+  // Response time — recompute percentiles from per-day samples if available
+  const hasRtByDay = Array.isArray(data.responseTimeByDay) && data.responseTimeByDay.length > 0;
+  let rt = data.responseTime;
+  if (isFiltered && hasRtByDay) {
+    const filteredDays = filterByDateRange(data.responseTimeByDay!, "date", from, to);
+    const mergedSamples: number[] = [];
+    let sum = 0, count = 0;
+    for (const d of filteredDays) {
+      if (d.samples?.length) mergedSamples.push(...d.samples);
+      sum += d.sum;
+      count += d.count;
+    }
+    rt = count > 0 ? statsFromSamples(mergedSamples, sum, count) : { avg: 0, median: 0, p95: 0, p99: 0 };
+  }
+
+  // Show stale-data label on blocks whose filtering requires an older re-analyzed dataset
+  const statusStale = isFiltered && !hasStatusByDay;
+  const rtStale = isFiltered && !hasRtByDay;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -36,9 +80,9 @@ export default function OverviewPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <Card title="Total Requests" value={isFiltered ? filteredTotal : data.totalRequests} sub={isFiltered ? `filtered from ${data.totalRequests.toLocaleString()}` : undefined} />
-        <Card title="Unique URLs" value={data.uniqueUrls} sub="(capped at 100k)" />
+        <Card title="Unique URLs" value={data.uniqueUrls} sub={isFiltered ? "full range (capped at 100k)" : "(capped at 100k)"} />
         <Card title="Date Range" value={filteredDateRange} sub={isFiltered ? `${filteredByDay.length} days` : undefined} />
-        <Card title="Avg Response Time" value={`${data.responseTime.avg}s`} sub={`p95: ${data.responseTime.p95}s | p99: ${data.responseTime.p99}s`} />
+        <Card title="Avg Response Time" value={`${rt.avg}s`} sub={`p95: ${rt.p95}s | p99: ${rt.p99}s${rtStale ? " · full range" : ""}`} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
@@ -58,7 +102,10 @@ export default function OverviewPage() {
 
         {/* Status Codes Pie */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
-          <h3 className="text-base md:text-lg font-semibold mb-3">Status Codes</h3>
+          <div className="flex items-baseline justify-between mb-3">
+            <h3 className="text-base md:text-lg font-semibold">Status Codes</h3>
+            {statusStale && <span className="text-xs text-gray-500">full range · re-analyze for per-day</span>}
+          </div>
           <ResponsiveContainer width="100%" height={280}>
             <PieChart>
               <Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="45%" outerRadius={80} label={({ name, percent }) => `${name} (${(percent * 100).toFixed(1)}%)`} labelLine={{ strokeWidth: 1 }}>
@@ -78,36 +125,39 @@ export default function OverviewPage() {
         <h3 className="text-base md:text-lg font-semibold mb-3">Bot vs Human Traffic</h3>
         <div className="grid grid-cols-2 gap-3 md:gap-4">
           <div className="text-center">
-            <div className="text-xl md:text-3xl font-bold text-blue-400">{data.botVsHuman.human.requests.toLocaleString()}</div>
+            <div className="text-xl md:text-3xl font-bold text-blue-400">{filteredHumanTotal.toLocaleString()}</div>
             <div className="text-xs md:text-base text-gray-400">Human Requests</div>
-            <div className="text-xs text-gray-500">Avg RT: {data.botVsHuman.human.avgResponseTime}s</div>
+            <div className="text-xs text-gray-500">Avg RT: {data.botVsHuman.human.avgResponseTime}s{isFiltered ? " (full range)" : ""}</div>
           </div>
           <div className="text-center">
-            <div className="text-xl md:text-3xl font-bold text-yellow-400">{data.botVsHuman.bot.requests.toLocaleString()}</div>
+            <div className="text-xl md:text-3xl font-bold text-yellow-400">{filteredBotTotal.toLocaleString()}</div>
             <div className="text-xs md:text-base text-gray-400">Bot Requests</div>
-            <div className="text-xs text-gray-500">Avg RT: {data.botVsHuman.bot.avgResponseTime}s</div>
+            <div className="text-xs text-gray-500">Avg RT: {data.botVsHuman.bot.avgResponseTime}s{isFiltered ? " (full range)" : ""}</div>
           </div>
         </div>
       </div>
 
       {/* Response Time */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-3 md:p-4">
-        <h3 className="text-base md:text-lg font-semibold mb-3">Response Time Distribution</h3>
+        <div className="flex items-baseline justify-between mb-3">
+          <h3 className="text-base md:text-lg font-semibold">Response Time Distribution</h3>
+          {rtStale && <span className="text-xs text-gray-500">full range · re-analyze for per-day</span>}
+        </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 md:gap-4 text-center">
           <div>
-            <div className="text-lg md:text-xl font-bold text-green-400">{data.responseTime.avg}s</div>
+            <div className="text-lg md:text-xl font-bold text-green-400">{rt.avg}s</div>
             <div className="text-gray-500 text-xs md:text-sm">Average</div>
           </div>
           <div>
-            <div className="text-lg md:text-xl font-bold text-blue-400">{data.responseTime.median}s</div>
+            <div className="text-lg md:text-xl font-bold text-blue-400">{rt.median}s</div>
             <div className="text-gray-500 text-xs md:text-sm">Median</div>
           </div>
           <div>
-            <div className="text-lg md:text-xl font-bold text-yellow-400">{data.responseTime.p95}s</div>
+            <div className="text-lg md:text-xl font-bold text-yellow-400">{rt.p95}s</div>
             <div className="text-gray-500 text-xs md:text-sm">p95</div>
           </div>
           <div>
-            <div className="text-lg md:text-xl font-bold text-red-400">{data.responseTime.p99}s</div>
+            <div className="text-lg md:text-xl font-bold text-red-400">{rt.p99}s</div>
             <div className="text-gray-500 text-xs md:text-sm">p99</div>
           </div>
         </div>
