@@ -2,6 +2,9 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
 
+// Re-export so existing imports (`import { filterByDateRange } from "@/lib/date-range-context"`) keep working.
+export { filterByDateRange } from "./date-range-filter";
+
 interface DateRange {
   from: string | null;
   to: string | null;
@@ -22,18 +25,6 @@ const DateRangeContext = createContext<DateRangeContextType>({
 
 export function useDateRange() {
   return useContext(DateRangeContext);
-}
-
-/** Filter an array of items by date range. Items must have a string date field. */
-export function filterByDateRange<T>(items: T[], dateKey: keyof T, from: string | null, to: string | null): T[] {
-  if (!from && !to) return items;
-  return items.filter((item) => {
-    const d = String(item[dateKey] || "");
-    if (!d) return true;
-    if (from && d < from) return false;
-    if (to && d > to) return false;
-    return true;
-  });
 }
 
 const STORAGE_KEY = "loganalyzer_date_range";

@@ -34,4 +34,33 @@ export class ReservoirStats {
       p99: sorted[Math.floor(n * 0.99)],
     };
   }
+
+  /** Serialize the raw reservoir samples (for storage). */
+  getSamples(): number[] {
+    return this.reservoir.slice();
+  }
+}
+
+/**
+ * Compute avg / median / p95 / p99 from a merged sample pool plus true sum and count.
+ * Used to recompute response-time stats for an arbitrary filtered date range where
+ * each day contributes its own reservoir samples.
+ */
+export function statsFromSamples(
+  samples: number[],
+  sum: number,
+  count: number,
+): { avg: number; median: number; p95: number; p99: number } {
+  if (count === 0 || samples.length === 0) {
+    return { avg: 0, median: 0, p95: 0, p99: 0 };
+  }
+  const sorted = samples.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  const round3 = (v: number) => Math.round(v * 1000) / 1000;
+  return {
+    avg: round3(sum / count),
+    median: round3(sorted[Math.floor(n * 0.5)]),
+    p95: round3(sorted[Math.floor(n * 0.95)]),
+    p99: round3(sorted[Math.floor(n * 0.99)]),
+  };
 }

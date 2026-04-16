@@ -8,6 +8,16 @@ export interface UACount {
   count: number;
 }
 
+export interface ClusterDayDetail {
+  date: string;
+  count: number;
+  statuses: Record<string, number>;
+  /** Reservoir sample of RT values (seconds) for this cluster × day. */
+  samples: number[];
+  sum: number;
+  obsCount: number;
+}
+
 export interface Cluster {
   pattern: string;
   count: number;
@@ -16,6 +26,8 @@ export interface Cluster {
   byDay: DayCount[];
   topUAs: UACount[];
   sampleUrls?: string[];
+  /** Optional — only present on analyses parsed after per-cluster per-day tracking was added. */
+  detailByDay?: ClusterDayDetail[];
 }
 
 export interface ErrorEntry {
@@ -268,13 +280,30 @@ export interface SchemaHistoryEntry {
   changes: { new_error: number; fixed: number; degraded: number; missing: number };
 }
 
+export interface StatusCodesByDay {
+  date: string;
+  statuses: Record<string, number>;
+}
+
+export interface ResponseTimeByDay {
+  date: string;
+  /** Reservoir sample of RT values (in seconds) for this day — used to recompute percentiles across filtered date ranges. */
+  samples: number[];
+  sum: number;
+  count: number;
+}
+
 export interface Summary {
   totalRequests: number;
   uniqueUrls: number;
   dateRange: { from: string; to: string };
   requestsByDay: DayCount[];
   statusCodes: Record<string, number>;
+  /** Optional — only present on analyses parsed after per-day tracking was added. */
+  statusCodesByDay?: StatusCodesByDay[];
   responseTime: { avg: number; median: number; p95: number; p99: number };
+  /** Optional — only present on analyses parsed after per-day tracking was added. */
+  responseTimeByDay?: ResponseTimeByDay[];
   clusters: Cluster[];
   errors: {
     "404": ErrorEntry[];

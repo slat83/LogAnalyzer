@@ -2,7 +2,12 @@ import { inflate } from "pako";
 import { ReservoirStats } from "./stats";
 import { detectBot, isGooglebot } from "./bots";
 import { classifyUrl, detectLanguage, extractCheckoutId, compileRules, type UrlRule } from "./classify";
-import type { Summary, Cluster, DayCount, BotData } from "@/lib/types";
+import type { Summary, Cluster, DayCount, BotData, StatusCodesByDay, ResponseTimeByDay, ClusterDayDetail } from "@/lib/types";
+
+/** How many RT samples to keep per day for filtered percentile recomputation (global). */
+const RT_SAMPLES_PER_DAY = 150;
+/** Per-cluster per-day RT sample budget. Smaller than global because each cluster has fewer observations. */
+const CLUSTER_RT_SAMPLES_PER_DAY = 30;
 
 export interface ParseProgress {
   filesProcessed: number;
@@ -13,11 +18,19 @@ export interface ParseProgress {
   error?: string;
 }
 
+interface ClusterDayAcc {
+  count: number;
+  statuses: Record<string, number>;
+  rt: ReservoirStats;
+}
+
 interface ClusterAcc {
   count: number;
   statuses: Record<string, number>;
   rtStats: ReservoirStats;
   byDay: Record<string, number>;
+  /** Per-day detail (counts + statuses + RT) for filtered metrics on the clusters page. */
+  byDayDetail: Record<string, ClusterDayAcc>;
   uas: Record<string, number>;
 }
 
@@ -117,6 +130,9 @@ export async function parseLogFiles(
   const clusters = new Map<string, ClusterAcc>();
   const statusCodes: Record<string, number> = {};
   const requestsByDay: Record<string, number> = {};
+  // Per-day breakdowns (for date-range filtering on Overview)
+  const statusByDay: Record<string, Record<string, number>> = {};
+  const rtByDay: Record<string, ReservoirStats> = {};
   const bots: Record<string, BotAcc> = {};
   let botRequests = 0, humanRequests = 0;
   let botRtSum = 0, humanRtSum = 0;
@@ -211,9 +227,15 @@ export async function parseLogFiles(
       // Requests by day
       requestsByDay[dateIso] = (requestsByDay[dateIso] || 0) + 1;
 
-      // Response time
+      // Status codes per day
+      if (!statusByDay[dateIso]) statusByDay[dateIso] = {};
+      statusByDay[dateIso][sc] = (statusByDay[dateIso][sc] || 0) + 1;
+
+      // Response time (global + per day)
       if (rt != null) {
         globalRt.add(rt);
+        if (!rtByDay[dateIso]) rtByDay[dateIso] = new ReservoirStats(RT_SAMPLES_PER_DAY);
+        rtByDay[dateIso].add(rt);
       }
 
       // Bot detection
@@ -238,13 +260,22 @@ export async function parseLogFiles(
 
       // Cluster accumulation
       if (!clusters.has(cluster)) {
-        clusters.set(cluster, { count: 0, statuses: {}, rtStats: new ReservoirStats(500), byDay: {}, uas: {} });
+        clusters.set(cluster, { count: 0, statuses: {}, rtStats: new ReservoirStats(500), byDay: {}, byDayDetail: {}, uas: {} });
       }
       const ca = clusters.get(cluster)!;
       ca.count++;
       ca.statuses[sc] = (ca.statuses[sc] || 0) + 1;
       if (rt != null) ca.rtStats.add(rt);
       ca.byDay[dateIso] = (ca.byDay[dateIso] || 0) + 1;
+      // Per-day detail
+      let cd = ca.byDayDetail[dateIso];
+      if (!cd) {
+        cd = { count: 0, statuses: {}, rt: new ReservoirStats(CLUSTER_RT_SAMPLES_PER_DAY) };
+        ca.byDayDetail[dateIso] = cd;
+      }
+      cd.count++;
+      cd.statuses[sc] = (cd.statuses[sc] || 0) + 1;
+      if (rt != null) cd.rt.add(rt);
       const shortUa = ua.length > 40 ? ua.substring(0, 40) : ua;
       if (Object.keys(ca.uas).length < 50) {
         ca.uas[shortUa] = (ca.uas[shortUa] || 0) + 1;
@@ -348,6 +379,16 @@ export async function parseLogFiles(
 
   const clusterArr: Cluster[] = sortedClusters.map(([pattern, ca]) => {
     const crt = ca.rtStats.getStats();
+    const detailByDay: ClusterDayDetail[] = Object.entries(ca.byDayDetail)
+      .map(([date, d]) => ({
+        date,
+        count: d.count,
+        statuses: d.statuses,
+        samples: d.rt.getSamples(),
+        sum: d.rt.sum,
+        obsCount: d.rt.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
     return {
       pattern,
       count: ca.count,
@@ -355,6 +396,7 @@ export async function parseLogFiles(
       responseTime: { avg: crt.avg, p95: crt.p95 },
       byDay: Object.entries(ca.byDay).map(([d, c]) => ({ date: d, count: c })).sort((a, b) => a.date.localeCompare(b.date)),
       topUAs: Object.entries(ca.uas).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([u, c]) => ({ ua: u, count: c })),
+      detailByDay,
     };
   });
 
@@ -430,13 +472,24 @@ export async function parseLogFiles(
 
   const pct = (n: number, total: number) => total > 0 ? Math.round((n / total) * 10000) / 100 : 0;
 
+  // Per-day status + RT (sorted by date)
+  const statusCodesByDay: StatusCodesByDay[] = Object.entries(statusByDay)
+    .map(([date, statuses]) => ({ date, statuses }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const responseTimeByDay: ResponseTimeByDay[] = Object.entries(rtByDay)
+    .map(([date, r]) => ({ date, samples: r.getSamples(), sum: r.sum, count: r.count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   const summary: Summary = {
     totalRequests,
     uniqueUrls: urls.size,
     dateRange: { from: minDate, to: maxDate },
     requestsByDay: Object.entries(requestsByDay).map(([d, c]) => ({ date: d, count: c })).sort((a, b) => a.date.localeCompare(b.date)),
     statusCodes,
+    statusCodesByDay,
     responseTime: rtStats,
+    responseTimeByDay,
     clusters: clusterArr,
     errors: { "404": err404, "500": err5xx, slow },
     bots: botsOut,
