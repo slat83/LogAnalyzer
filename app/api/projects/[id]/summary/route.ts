@@ -1,6 +1,54 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Summary, Cluster, BotData, DayCount } from "@/lib/types";
+import { fetchAllPaged } from "@/lib/paginate";
+
+type ClusterDailyRow = { cluster_id: string; day: string; request_count: number };
+type ClusterUARow = { cluster_id: string; user_agent: string; request_count: number };
+type BotDailyRow = { bot_id: string; day: string; request_count: number };
+
+async function fetchClusterDaily(
+  supabase: SupabaseClient,
+  clusterIds: string[],
+): Promise<ClusterDailyRow[]> {
+  return fetchAllPaged<ClusterDailyRow>((from, to) =>
+    supabase
+      .from("cluster_daily")
+      .select("cluster_id, day, request_count")
+      .in("cluster_id", clusterIds)
+      .order("day")
+      .range(from, to),
+  );
+}
+
+async function fetchClusterUAs(
+  supabase: SupabaseClient,
+  clusterIds: string[],
+): Promise<ClusterUARow[]> {
+  return fetchAllPaged<ClusterUARow>((from, to) =>
+    supabase
+      .from("cluster_user_agents")
+      .select("cluster_id, user_agent, request_count")
+      .in("cluster_id", clusterIds)
+      .order("request_count", { ascending: false })
+      .range(from, to),
+  );
+}
+
+async function fetchBotDaily(
+  supabase: SupabaseClient,
+  botIds: string[],
+): Promise<BotDailyRow[]> {
+  return fetchAllPaged<BotDailyRow>((from, to) =>
+    supabase
+      .from("bot_daily")
+      .select("bot_id, day, request_count")
+      .in("bot_id", botIds)
+      .order("day")
+      .range(from, to),
+  );
+}
 
 /**
  * GET /api/projects/[id]/summary
@@ -54,13 +102,13 @@ export async function GET(
   let clusterUAMap = new Map<string, { ua: string; count: number }[]>();
 
   if (clusterIds.length > 0) {
-    const [dailyRes, uaRes] = await Promise.all([
-      supabase.from("cluster_daily").select("cluster_id, day, request_count").in("cluster_id", clusterIds).order("day").range(0, 19999),
-      supabase.from("cluster_user_agents").select("cluster_id, user_agent, request_count").in("cluster_id", clusterIds).order("request_count", { ascending: false }).range(0, 9999),
+    const [dailyRows, uaRows] = await Promise.all([
+      fetchClusterDaily(supabase, clusterIds),
+      fetchClusterUAs(supabase, clusterIds),
     ]);
 
     // Group daily by cluster_id
-    for (const row of dailyRes.data || []) {
+    for (const row of dailyRows) {
       const arr = clusterDailyMap.get(row.cluster_id) || [];
       arr.push({ date: row.day, count: row.request_count });
       clusterDailyMap.set(row.cluster_id, arr);
@@ -68,7 +116,7 @@ export async function GET(
 
     // Group UAs by cluster_id (top 10 per cluster)
     const uaCounts = new Map<string, number>();
-    for (const row of uaRes.data || []) {
+    for (const row of uaRows) {
       const arr = clusterUAMap.get(row.cluster_id) || [];
       const cnt = uaCounts.get(row.cluster_id) || 0;
       if (cnt < 10) {
@@ -84,14 +132,8 @@ export async function GET(
   let botDailyMap = new Map<string, DayCount[]>();
 
   if (botIds.length > 0) {
-    const botDailyRes = await supabase
-      .from("bot_daily")
-      .select("bot_id, day, request_count")
-      .in("bot_id", botIds)
-      .order("day")
-      .range(0, 4999);
-
-    for (const row of botDailyRes.data || []) {
+    const botDailyRows = await fetchBotDaily(supabase, botIds);
+    for (const row of botDailyRows) {
       const arr = botDailyMap.get(row.bot_id) || [];
       arr.push({ date: row.day, count: row.request_count });
       botDailyMap.set(row.bot_id, arr);
