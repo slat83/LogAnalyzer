@@ -247,8 +247,15 @@ export async function parseLogFiles(
         if (!bots[bot]) bots[bot] = { requests: 0, pages: {}, byDay: {} };
         bots[bot].requests++;
         bots[bot].byDay[dateIso] = (bots[bot].byDay[dateIso] || 0) + 1;
-        if (Object.keys(bots[bot].pages).length < 100) {
-          bots[bot].pages[url] = (bots[bot].pages[url] || 0) + 1;
+        // Cap the number of *distinct* URLs per bot at 100 to bound memory,
+        // but always increment counts for URLs we're already tracking.
+        // Previously the condition below guarded both the add and the
+        // increment, so once a bot's pages dict hit 100 entries all future
+        // hits were dropped — Googlebot with 59K requests had /login at 43.
+        if (bots[bot].pages[url] !== undefined) {
+          bots[bot].pages[url]++;
+        } else if (Object.keys(bots[bot].pages).length < 100) {
+          bots[bot].pages[url] = 1;
         }
       } else {
         humanRequests++;

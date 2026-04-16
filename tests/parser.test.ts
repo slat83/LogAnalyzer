@@ -127,3 +127,60 @@ describe("parseLogFiles — per-cluster detailByDay", () => {
     expect(detailStatusSum).toBe(cluster.statuses["200"]);
   });
 });
+
+describe("parseLogFiles — bot topPages cap", () => {
+  /**
+   * Regression: previously `bots[bot].pages[url] = (bots[bot].pages[url] || 0) + 1`
+   * was gated by `Object.keys(pages).length < 100`, so once a bot had seen 100
+   * distinct URLs the parser stopped incrementing counts on ALL subsequent hits,
+   * including repeats of URLs it was already tracking. Googlebot with 60K
+   * requests ended up showing /login at count=43 because the cap kicked in
+   * early in the stream and every later /login hit was dropped.
+   */
+  it("keeps incrementing counts on already-tracked URLs after the 100-URL cap is reached", async () => {
+    const lines: string[] = [];
+    // 120 distinct URLs visited once each — this fills the cap.
+    for (let i = 0; i < 120; i++) {
+      lines.push(
+        `08/Apr/2026:12:00:${String(i % 60).padStart(2, "0")} +0000 /url-${i} Googlebot/2.1 200 0.100`,
+      );
+    }
+    // Then /url-0 (tracked in the first 100) gets hit 500 more times.
+    // Without the fix, all 500 hits are dropped and /url-0 stays at count=1.
+    for (let i = 0; i < 500; i++) {
+      lines.push(
+        `09/Apr/2026:12:00:${String(i % 60).padStart(2, "0")} +0000 /url-0 Googlebot/2.1 200 0.100`,
+      );
+    }
+
+    const file = makeLogFile("access.log", lines);
+    const summary = await parseLogFiles([file], [], () => {});
+
+    const googlebot = summary.bots["googlebot"];
+    expect(googlebot).toBeDefined();
+    // Every request is a Googlebot hit — the per-bot totals should match.
+    expect(googlebot.requests).toBe(620);
+
+    const url0 = googlebot.topPages.find((p) => p.url === "/url-0");
+    expect(url0, "/url-0 must still be tracked in topPages").toBeDefined();
+    expect(url0!.count).toBe(501); // 1 initial + 500 repeats after cap
+  });
+
+  it("does not add URL #101 once the cap is full (memory bound still holds)", async () => {
+    const lines: string[] = [];
+    for (let i = 0; i < 100; i++) {
+      lines.push(
+        `08/Apr/2026:12:00:${String(i % 60).padStart(2, "0")} +0000 /fill-${i} Googlebot/2.1 200 0.100`,
+      );
+    }
+    // 101st distinct URL — must NOT land in topPages because the cap is at 100
+    lines.push("09/Apr/2026:12:00:00 +0000 /overflow Googlebot/2.1 200 0.100");
+
+    const file = makeLogFile("access.log", lines);
+    const summary = await parseLogFiles([file], [], () => {});
+
+    const googlebot = summary.bots["googlebot"];
+    const overflow = googlebot.topPages.find((p) => p.url === "/overflow");
+    expect(overflow).toBeUndefined();
+  });
+});
