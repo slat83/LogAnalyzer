@@ -66,6 +66,20 @@ export function projectRedirects(
     };
   }
 
+  // If NO cluster has detailByDay, we can't project anything. Fall back to
+  // the all-time values and flag hasDetail=false so the UI renders "(full
+  // range)" on every row. Without this branch the KPI cards would read 0
+  // because the per-status sum below finds no detail to aggregate.
+  if (detailByPattern.size === 0) {
+    return {
+      total: redirects.total,
+      byStatus: redirects.byStatus,
+      byPattern: redirects.byPattern.map((p) => ({ ...p, hasDetail: false })),
+      isFiltered: true,
+      anyDetailAvailable: false,
+    };
+  }
+
   // Filtered → rebuild per pattern from detailByDay.statuses
   let anyDetailAvailable = false;
   const byPattern: ProjectedRedirectPattern[] = redirects.byPattern.map((p) => {

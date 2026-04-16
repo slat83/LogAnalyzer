@@ -196,3 +196,31 @@ describe("projectRedirects — anyDetailAvailable flag", () => {
     expect(out.anyDetailAvailable).toBe(false);
   });
 });
+
+describe("projectRedirects — no-detail fallback under filter", () => {
+  it("preserves all-time total and byStatus when no cluster has detailByDay", () => {
+    // Regression: previously when anyDetailAvailable was false, the KPI cards
+    // showed Total=0 and 301/302/307=0/0/0 because byStatus was rebuilt from
+    // detail clusters (none exist). The UI banner already tells the user the
+    // filter is ineffective; numbers must stay at all-time.
+    const out = projectRedirects(
+      {
+        total: 1000,
+        byStatus: { "301": 600, "302": 400 },
+        byPattern: [
+          { pattern: "/x/*", count: 700, botCount: 350, humanCount: 350 },
+          { pattern: "/y/*", count: 300, botCount: 150, humanCount: 150 },
+        ],
+      },
+      [], // zero clusters, so no detailByDay
+      "2026-04-09",
+      "2026-04-10",
+    );
+    expect(out.total).toBe(1000);
+    expect(out.byStatus).toEqual({ "301": 600, "302": 400 });
+    expect(out.byPattern[0].count).toBe(700);
+    expect(out.byPattern.every((p) => !p.hasDetail)).toBe(true);
+    expect(out.anyDetailAvailable).toBe(false);
+    expect(out.isFiltered).toBe(true);
+  });
+});
