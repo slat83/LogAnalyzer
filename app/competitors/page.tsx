@@ -43,12 +43,25 @@ export default function CompetitorsPage() {
   const [fetching, setFetching] = useState(false);
   const [fetchMsg, setFetchMsg] = useState<string | null>(null);
 
-  function loadData() {
+  function loadData({ initial = false }: { initial?: boolean } = {}) {
     if (!projectId) return;
     fetch(`/api/projects/${projectId}/competitors`)
       .then((r) => r.json())
-      .then((d) => { setData(d.data || []); setLoading(false); })
-      .catch((e) => { setError(e.message); setLoading(false); });
+      .then((d) => {
+        // Only replace the list on a successful response. Without this guard,
+        // a transient error on the reload-after-fetch would call setData([])
+        // and the UI's "!data.length" check would render <NoProject /> — the
+        // user perceives that as "fetch erased all my data".
+        if (Array.isArray(d?.data)) setData(d.data);
+        setLoading(false);
+      })
+      .catch((e) => {
+        if (initial) setError(e.message);
+        // On a post-fetch reload, keep the existing rows visible and just
+        // surface the error via fetchMsg; do not blank the dashboard.
+        else setFetchMsg(`Reload failed: ${e instanceof Error ? e.message : "Unknown"}`);
+        setLoading(false);
+      });
   }
 
   async function handleFetch() {
@@ -59,7 +72,7 @@ export default function CompetitorsPage() {
       const d = await res.json();
       if (!res.ok) throw new Error(d.error);
       setFetchMsg(`+${d.data?.inserted || 0} new, ${d.data?.brandMentions || 0} brand mentions`);
-      // Reload data
+      // Reload data (non-initial: reload errors must not wipe the view)
       loadData();
     } catch (e) { setFetchMsg(`Error: ${e instanceof Error ? e.message : "Failed"}`); }
     setFetching(false);
@@ -67,7 +80,7 @@ export default function CompetitorsPage() {
 
   useEffect(() => {
     if (pLoading || !projectId) { setLoading(false); return; }
-    loadData();
+    loadData({ initial: true });
   }, [projectId, pLoading]);
 
   if (loading) return <div className="text-gray-400 p-8">Loading...</div>;

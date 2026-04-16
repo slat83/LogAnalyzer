@@ -23,25 +23,45 @@ export async function GET(request: Request) {
 
   const admin = createClient(supabaseUrl, serviceRoleKey);
 
-  // Get all projects that have brand_keywords configured
+  // Poll every project that has at least one enabled competitor rule bound
+  // to a Firehose rule UUID. Joining from competitor_rules avoids scanning
+  // projects with no active monitoring.
+  const { data: ruleRows } = await admin
+    .from("competitor_rules")
+    .select("id, tag, project_id, firehose_rule_id, enabled")
+    .eq("enabled", true)
+    .not("firehose_rule_id", "is", null);
+
+  const bindingsByProject = new Map<
+    string,
+    { id: string; firehoseRuleId: string; tag: string }[]
+  >();
+  for (const r of ruleRows || []) {
+    const list = bindingsByProject.get(r.project_id) || [];
+    list.push({ id: r.id, firehoseRuleId: r.firehose_rule_id as string, tag: r.tag });
+    bindingsByProject.set(r.project_id, list);
+  }
+
+  if (bindingsByProject.size === 0) {
+    return NextResponse.json({ message: "No projects with enabled competitor rules" });
+  }
+
   const { data: projects } = await admin
     .from("projects")
     .select("id, brand_keywords")
-    .not("brand_keywords", "eq", "{}");
-
-  if (!projects?.length) {
-    return NextResponse.json({ message: "No projects with brand keywords" });
-  }
+    .in("id", Array.from(bindingsByProject.keys()));
 
   const results = [];
 
-  for (const project of projects) {
+  for (const project of projects || []) {
+    const bindings = bindingsByProject.get(project.id) || [];
     try {
       const { data, error } = await admin.functions.invoke("firehose-poller", {
         body: {
           projectId: project.id,
           tapToken,
           keywords: project.brand_keywords || [],
+          rules: bindings,
           supabaseUrl,
           supabaseServiceKey: serviceRoleKey,
           since: "24h",
@@ -50,15 +70,17 @@ export async function GET(request: Request) {
 
       results.push({
         projectId: project.id,
+        rulesPolled: bindings.length,
         ...(error ? { error: error.message } : data),
       });
     } catch (err) {
       results.push({
         projectId: project.id,
+        rulesPolled: bindings.length,
         error: err instanceof Error ? err.message : "Unknown error",
       });
     }
   }
 
-  return NextResponse.json({ results, projectsPolled: projects.length });
+  return NextResponse.json({ results, projectsPolled: results.length });
 }
