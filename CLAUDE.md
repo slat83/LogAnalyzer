@@ -59,6 +59,9 @@ lib/                          # Shared utilities
   encryption.ts               # AES-256-GCM encrypt/decrypt
   paginate.ts                 # fetchAllPaged — walks PostgREST's 1000-row cap
   cluster-projection.ts       # projectCluster — recompute cluster stats for date range
+  error-projection.ts         # projectErrors — 404/5xx/slow tables from cluster detail
+  bot-projection.ts           # projectBots — filter bots & derive bot-vs-human from byDay
+  redirect-projection.ts      # projectRedirects — 301/302/307/308 per pattern
   date-range-context.tsx      # React Context + localStorage for active range
   date-range-filter.ts        # filterByDateRange pure helper (testable without JSX)
   use-summary.ts              # React hook for Summary with loading/error
@@ -70,9 +73,15 @@ lib/                          # Shared utilities
     stats.ts                  # ReservoirStats (O(k) percentile approx) + statsFromSamples
     bots.ts                   # Bot detection (17+ named + generic)
     classify.ts               # URL classification (custom rules + defaults)
-tests/                        # Test suites
-  *.test.ts                   # vitest — pure logic (parser, stats, projection)
-  *.test.mjs                  # node --test — API-boundary regressions (paginate)
+tests/                        # Test suites (npm test runs both)
+  cluster-projection.test.ts  # vitest — cluster date-range re-projection
+  error-projection.test.ts    # vitest — errors page date-range re-projection
+  bot-projection.test.ts      # vitest — bots page filter + Bot-vs-Human derivation
+  redirect-projection.test.ts # vitest — redirects page projection + fallback
+  parser.test.ts              # vitest — parser output, bot topPages cap regression
+  stats.test.ts               # vitest — reservoir + statsFromSamples
+  date-range.test.ts          # vitest — filterByDateRange edge cases
+  paginate.test.mjs           # node --test — PostgREST 1000-row pagination invariant
 docs/                         # Documentation
   requirements.md             # Phased requirements (0-5)
   architecture-mindmap.md     # Complete architecture mindmap
@@ -89,9 +98,35 @@ npm test                # Runs both vitest (tests/*.test.ts) and node --test (te
 
 ### Tests
 
-- `vitest` suite in `tests/*.test.ts` covers pure logic: log parser, `statsFromSamples`, `filterByDateRange`, `projectCluster`.
+- `vitest` suite in `tests/*.test.ts` covers pure logic: log parser, `statsFromSamples`, `filterByDateRange`, every `*-projection.ts` module. 60+ cases.
 - `node --test` suite in `tests/*.test.mjs` covers API-boundary invariants that vitest can't reach, e.g. Supabase's 1000-row pagination behaviour (`paginate.test.mjs`). Add tests here whenever you discover a regression the in-memory vitest suite couldn't have caught — the `projectCluster` tests all passed while prod shipped `0 of 200` for exactly that reason.
 - Run a single file: `npx vitest run tests/parser.test.ts` or `node --test tests/paginate.test.mjs`.
+
+### Date-range projection pattern
+
+Every dashboard page that shows tables or KPI cards must react to the global date range. We do this client-side — no API changes — via a `project<Thing>(data, clusters, from, to)` pure helper per page. Pattern (see `lib/cluster-projection.ts`, `error-projection.ts`, `bot-projection.ts`, `redirect-projection.ts`):
+
+1. Look up each row's matching entry in `summary.clusters[].detailByDay` by pattern. Only the top-200 clusters carry `detailByDay`; rows whose pattern is outside that set (a common case for 404 patterns and rare redirects) must keep the all-time number and be flagged `hasDetail: false` so the UI renders a `(full range)` chip.
+2. Sum the relevant slice of `detailByDay[i].statuses` across the filtered days. For redirects it's `301|302|307|308`; for 5xx it's any code starting with `"5"` (not just 500 — 520/503/etc. must be counted); for slow patterns, `detailByDay` can filter the *count* but not the slow-only avg RT (the parser's slow reservoir isn't persisted).
+3. Drop rows whose filtered count is zero **only if** they have detail. Rows without detail stay visible at their all-time count.
+4. Return a `{ rows, isFiltered, anyDetailAvailable }` shape. The page shows a global banner "re-analyze logs to filter X by date" when `isFiltered && !anyDetailAvailable` — this happens on analyses parsed before `b1fed20`. KPI cards in that case should fall back to all-time totals, NOT render zeros.
+5. Unfiltered counts and ratios (bot/human share on redirects, slow-only avgTime, bot Avg RT) stay at full-range because the parser doesn't carry them per-day. Mark them in the UI, don't silently freeze values users think are filtered.
+
+When wiring up a new page to the date range, start from one of the existing `*-projection.ts` modules and its tests. Do NOT try to filter by re-querying the DB; `summary/route.ts` returns everything at once and pagination via `lib/paginate.ts` already covers the 1000-row cap.
+
+### Parser memory caps — cap ADDS, never INCREMENTS
+
+When you see `if (Object.keys(dict).length < N) dict[key] = (dict[key] || 0) + 1`, it's wrong. That condition blocks both adding a new key AND incrementing an existing one. Once the dict hits N keys, every subsequent hit on a key already in the dict gets dropped. This shipped in `bots[bot].pages` for months: Googlebot had 59,974 requests but `/login` showed count=43 because the cap kicked in after the 100th distinct URL and every later `/login` hit was discarded. The correct form is:
+
+```ts
+if (dict[key] !== undefined) {
+  dict[key]++;                                    // always increment known keys
+} else if (Object.keys(dict).length < N) {
+  dict[key] = 1;                                  // only cap the distinct-key count
+}
+```
+
+Applies to any per-bot, per-cluster, per-UA, per-pattern sampling where we bound distinct-key memory.
 
 ### Deployment
 
