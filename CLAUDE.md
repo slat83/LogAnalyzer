@@ -57,15 +57,22 @@ lib/                          # Shared utilities
   types.ts                    # All TypeScript interfaces (298 lines)
   data.ts                     # Data fetching layer (API-backed, cached)
   encryption.ts               # AES-256-GCM encrypt/decrypt
+  paginate.ts                 # fetchAllPaged — walks PostgREST's 1000-row cap
+  cluster-projection.ts       # projectCluster — recompute cluster stats for date range
+  date-range-context.tsx      # React Context + localStorage for active range
+  date-range-filter.ts        # filterByDateRange pure helper (testable without JSX)
   use-summary.ts              # React hook for Summary with loading/error
   project-context.tsx         # React Context for active project ID
   supabase/                   # Supabase clients (browser, server, middleware)
   parser/                     # Client-side log parser
     worker.ts                 # Web Worker (off-main-thread parsing)
     index.ts                  # parseLogFiles() orchestrator
-    stats.ts                  # ReservoirStats (O(k) percentile approx)
+    stats.ts                  # ReservoirStats (O(k) percentile approx) + statsFromSamples
     bots.ts                   # Bot detection (17+ named + generic)
     classify.ts               # URL classification (custom rules + defaults)
+tests/                        # Test suites
+  *.test.ts                   # vitest — pure logic (parser, stats, projection)
+  *.test.mjs                  # node --test — API-boundary regressions (paginate)
 docs/                         # Documentation
   requirements.md             # Phased requirements (0-5)
   architecture-mindmap.md     # Complete architecture mindmap
@@ -77,7 +84,14 @@ docs/                         # Documentation
 npm run dev             # Start Next.js dev server (frontend + API routes)
 npm run build           # Production build
 npm run start           # Start production server
+npm test                # Runs both vitest (tests/*.test.ts) and node --test (tests/*.test.mjs)
 ```
+
+### Tests
+
+- `vitest` suite in `tests/*.test.ts` covers pure logic: log parser, `statsFromSamples`, `filterByDateRange`, `projectCluster`.
+- `node --test` suite in `tests/*.test.mjs` covers API-boundary invariants that vitest can't reach, e.g. Supabase's 1000-row pagination behaviour (`paginate.test.mjs`). Add tests here whenever you discover a regression the in-memory vitest suite couldn't have caught — the `projectCluster` tests all passed while prod shipped `0 of 200` for exactly that reason.
+- Run a single file: `npx vitest run tests/parser.test.ts` or `node --test tests/paginate.test.mjs`.
 
 ### Deployment
 
@@ -114,6 +128,16 @@ CREDENTIAL_ENCRYPTION_KEY=        # 64-char hex AES-256 key for stored credentia
 - Return consistent JSON: `{ data }` or `{ error }` with status codes
 - Use `createClient()` from `@/lib/supabase/server` for server-side auth
 - Use `createAdminClient()` from `@supabase/supabase-js` for service role operations
+
+### Supabase gotchas (learned the hard way)
+
+- **PostgREST caps every response at 1000 rows.** `.range(0, 19999)` is silently truncated — there is no warning, no error, just a short result ordered by whatever `.order()` put first. For `cluster_daily` (200 clusters × N days), `.order("day")` + the cap means the earliest days survive and the most recent are invisible, which blanks the UI whenever the user filters a recent window. **Any query that can exceed 1000 rows must paginate via `lib/paginate.ts::fetchAllPaged`.** Current callers: `app/api/projects/[id]/summary/route.ts` for `cluster_daily` / `cluster_user_agents` / `bot_daily`.
+- **Firehose Edge Function requires `rules: RuleBinding[]`.** The `firehose-poller` function (v9+) early-returns `{inserted: 0, total: 0, message: "No rules configured"}` when `rules` is missing. Before invoking, load enabled rows from `competitor_rules` with a non-null `firehose_rule_id` and pass `[{id, firehoseRuleId, tag}, ...]`. Both `/api/cron/firehose` and `/api/projects/[id]/competitors/fetch` build the list; there is a legacy code path in `lib/firehose-invoke.ts` (on the `claude/ecstatic-franklin` branch) that also auto-provisions a brand rule from `projects.brand_keywords` when no rules exist.
+- **`competitor_mentions` has a unique index on `(project_id, url, rule_id, matched_at)`.** NULL `rule_id` values are treated as distinct under this constraint, so legacy rows without a rule binding will not dedupe against new rows. Upserts use `ignoreDuplicates: true`.
+
+### Frontend: never blank the view on reload errors
+
+Render guards like `if (error || !projectId) return <NoProject/>` replace the entire dashboard. If a component does an initial load AND a reload-after-action (e.g. fetching competitor mentions), the reload's catch must NOT write to the same `error` state — otherwise a transient network hiccup wipes rows the DB still has. Pattern: distinguish `initial` vs `reload` errors, and only the initial path may trigger `<NoProject/>`; reload errors should surface via a toast/message while keeping the current rows on screen. See `app/competitors/page.tsx::loadData({ initial })`.
 
 ## Security Rules
 
